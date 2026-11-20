@@ -43,6 +43,8 @@
 		<!-- 让测试能直接调用 internal 的安全守卫，而不必把它们提升成公共 API -->
 		<InternalsVisibleTo Include="DesktopTwin.Tests" />
 		<Compile Include="..\Shared\SessionLaunchProtocol.cs" Link="Launching\SessionLaunchProtocol.cs" />
+		<Compile Include="..\Shared\RelativeInputProtocol.cs" Link="Input\RelativeInputProtocol.cs" />
+		<Compile Include="..\Shared\InputLease.cs" Link="Input\InputLease.cs" />
 	</ItemGroup>
 
 	<!-- 一次性会话启动代理：使用 Windows 自带 Framework 编译器，不常驻、不安装自启项。 -->
@@ -62,9 +64,11 @@
 		       Text="找不到 .NET Framework 的编译器，无法构建程序启动代理。" />
 		<MakeDir Directories="$(IntermediateOutputPath)" />
 		<Exec Command="&quot;$(SessionLaunchCompiler)&quot; /nologo /warn:4 /warnaserror+ /target:winexe /optimize+ /win32manifest:&quot;$(SessionLaunchManifest)&quot; /win32icon:&quot;$(SessionLaunchIcon)&quot; /out:&quot;$(SessionLaunchOutput)&quot; /reference:System.dll /reference:System.Core.dll &quot;$(SessionLaunchSource)&quot; &quot;$(SessionLaunchWorkerSource)&quot; &quot;$(SessionLaunchProtocolSource)&quot;" />
+		<Exec Command="&quot;$(SessionLaunchCompiler)&quot; /nologo /warn:4 /warnaserror+ /target:winexe /optimize+ /win32manifest:&quot;$(SessionLaunchManifest)&quot; /out:&quot;$(IntermediateOutputPath)DesktopTwin.InputReceiver.exe&quot; /reference:System.dll /reference:System.Core.dll &quot;$(MSBuildThisFileDirectory)..\InputReceiver\SessionInputReceiver.cs&quot; &quot;$(MSBuildThisFileDirectory)..\InputReceiver\ReceiverInput.cs&quot; &quot;$(MSBuildThisFileDirectory)..\Shared\RelativeInputProtocol.cs&quot; &quot;$(MSBuildThisFileDirectory)..\Shared\InputLease.cs&quot;" />
 
 		<ItemGroup>
 			<EmbeddedResource Include="$(SessionLaunchOutput)" LogicalName="DesktopTwin.LaunchWorker.exe" />
+			<EmbeddedResource Include="$(IntermediateOutputPath)DesktopTwin.InputReceiver.exe" LogicalName="DesktopTwin.InputReceiver.exe" />
 		</ItemGroup>
 	</Target>
 

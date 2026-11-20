@@ -324,7 +324,9 @@ internal sealed class RdpActiveXHost : AxHost
     private void ApplyRelativeMouseMode(object client, object advancedSettings)
     {
         var extendedSettings = (IMsRdpExtendedSettings)client;
-        RelativeMouseModeConfiguredEnabled = _relativeMouseModeEnabled;
+        // The session input channel owns game-relative movement. Keep native RDP input
+        // absolute so desktop/Alt menus retain their normal coordinate mapping.
+        RelativeMouseModeConfiguredEnabled = false;
         RelativeMouseModeSettingsAccepted = RdpRelativeMouseOptions.Apply(
             RelativeMouseModeConfiguredEnabled,
             enabled =>
@@ -333,8 +335,8 @@ internal sealed class RdpActiveXHost : AxHost
                 extendedSettings.set_Property("AllowRelativeMouseMode", ref value);
             },
             enabled => SetComProperty(advancedSettings, "RelativeMouseMode", enabled));
-        AppLog.Info($"相对鼠标：请求={_relativeMouseModeEnabled}，"
-            + $"属性完整接受={RelativeMouseModeSettingsAccepted}。属性接受不代表游戏输入已验证。");
+        AppLog.Info($"游戏鼠标通道请求={_relativeMouseModeEnabled}；原生 RDP 保持绝对模式，"
+            + $"复位属性接受={RelativeMouseModeSettingsAccepted}。");
     }
 
     /// <summary>
@@ -576,7 +578,7 @@ internal sealed class RdpActiveXHost : AxHost
     {
         _displayReady = true;
         _lastDisplayRequest = null;
-        if (RelativeMouseModeSettingsAccepted)
+        if (RelativeMouseModeConfiguredEnabled && RelativeMouseModeSettingsAccepted)
         {
             var mode = RdpRelativeMouseOptions.ReapplyAfterLogin(RelativeMouseModeConfiguredEnabled,
                 enabled => SetComProperty(GetAdvancedSettings(), "RelativeMouseMode", enabled),

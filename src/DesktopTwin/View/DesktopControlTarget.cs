@@ -36,7 +36,8 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
             case "focus":
                 window.Activate();
                 WindowNativeMethods.SetForegroundWindow(new WindowInteropHelper(window).Handle);
-                return new { focused = RdpHost.IsHandleCreated && ChildSessionNativeMethods.TryFocusRdpInputWindow(RdpHost.Handle) };
+                return new { focused = ChildSessionNativeMethods.GetForegroundWindow() == new WindowInteropHelper(window).Handle
+                    && RdpHost.IsHandleCreated && ChildSessionNativeMethods.TryFocusRdpInputWindow(RdpHost.Handle) };
             case "resize":
                 if (window.ResizeMode == ResizeMode.NoResize) throw new InvalidOperationException("Restore windowed mode before a test resize.");
                 window.WindowState = WindowState.Normal;
@@ -62,10 +63,14 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
         var alt = request.Alt && scan != DesktopControlRequest.ScanCode("ALT");
         try
         {
-            if (alt) { DiagnosticInput.Key(0x38, false); await Task.Delay(100, cancellationToken); }
+            if (alt)
+            {
+                await HoldAltForMenuAsync(cancellationToken);
+                rect = RequireControlInput();
+            }
             if (scan != 0)
             {
-                DiagnosticInput.Key(scan, false);
+                SendKey(scan, false);
                 await Task.Delay(request.Milliseconds, cancellationToken);
                 return;
             }
@@ -73,11 +78,15 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
             {
                 if (request.X < 0 || request.Y < 0 || request.X >= rect.Right - rect.Left || request.Y >= rect.Bottom - rect.Top)
                     throw new ArgumentOutOfRangeException(nameof(request), "Click is outside the RDP surface.");
-                DiagnosticInput.MoveTo(rect.Left + request.X, rect.Top + request.Y);
-                DiagnosticInput.Mouse(0, 0, click: true);
+                if (!window.RelativeInput.Click())
+                {
+                    DiagnosticInput.MoveTo(rect.Left + request.X, rect.Top + request.Y);
+                    DiagnosticInput.Mouse(0, 0, click: true);
+                }
             }
             else
             {
+                if (window.RelativeInput.Move(request.X, request.Y)) return;
                 var cursor = DiagnosticInput.Cursor();
                 if (cursor.X < rect.Left || cursor.X >= rect.Right || cursor.Y < rect.Top || cursor.Y >= rect.Bottom)
                     throw new InvalidOperationException("Place the pointer inside the RDP surface before relative movement.");
@@ -88,9 +97,29 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
         }
         finally
         {
-            if (scan != 0) DiagnosticInput.Key(scan, true);
-            if (alt) DiagnosticInput.Key(0x38, true);
+            if (scan != 0) SendKey(scan, true);
+            if (alt) SendKey(0x38, true);
         }
+    }
+
+    private async Task HoldAltForMenuAsync(CancellationToken cancellationToken)
+    {
+        var sessionInput = window.RelativeInput.Ready;
+        SendKey(0x38, false);
+        if (!sessionInput) { await Task.Delay(200, cancellationToken); return; }
+        // Game cursor transitions can take longer than a fixed 200 ms. Never turn a menu click into an attack.
+        var deadline = Environment.TickCount64 + 1200;
+        while (window.RelativeInput.Ready && (window.RelativeInput.Captured
+            || window.RelativeInput.Status?.CursorVisible != true) && Environment.TickCount64 < deadline)
+            await Task.Delay(20, cancellationToken);
+        if (!window.RelativeInput.Ready || window.RelativeInput.Captured
+            || window.RelativeInput.Status?.CursorVisible != true)
+            throw new InvalidOperationException("The game did not release its cursor for the Alt click.");
+    }
+
+    private void SendKey(ushort scan, bool up)
+    {
+        if (!window.RelativeInput.SendKey(scan, up)) DiagnosticInput.Key(scan, up);
     }
 
     private WindowNativeMethods.NativeRect RequireControlInput()
@@ -114,6 +143,7 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
         return new
         {
             connected = RdpHost.ConnectedState, loggedIn = RdpHost.LoginComplete,
+            foreground = ChildSessionNativeMethods.GetForegroundWindow() == new WindowInteropHelper(window).Handle,
             watchMode = settings.Current.Session.WatchMode,
             window = new { left = windowBounds.Left, top = windowBounds.Top, width = windowBounds.Right - windowBounds.Left, height = windowBounds.Bottom - windowBounds.Top },
             surface, desktop = RdpHost.ReportedDesktopSize,
@@ -121,6 +151,8 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
             relativeAccepted = RdpHost.RelativeMouseModeSettingsAccepted,
             relativeReadback = RdpHost.RelativeMouseModeAfterLogin,
             relativeReported = RdpHost.ReportedRelativeMouseMode,
+            sessionInput = new { ready = window.RelativeInput.Ready, captured = window.RelativeInput.Captured,
+                rawMoves = window.RelativeInput.RawMoves, status = window.RelativeInput.Status, failure = window.RelativeInput.Failure },
             cursor = DiagnosticInput.CaptureState(),
             inputFocused = RdpHost.IsHandleCreated && ChildSessionNativeMethods.IsRdpInputWindowFocused(RdpHost.Handle)
         };

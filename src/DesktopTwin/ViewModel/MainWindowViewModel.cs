@@ -1500,6 +1500,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }));
     }
 
+    internal void NotifyRelativeInputFailure(string error) => ShowNotification(
+        Locale.Get("Menu.RelativeMouseMode"), Locale.Format("Notify.RelativeMouse.ChannelFailed", error),
+        InfoBarSeverity.Warning, TimeSpan.FromSeconds(8));
+
+    internal void NotifyRelativeInputReady() => ShowNotification(Locale.Get("Menu.RelativeMouseMode"),
+        Locale.Get("Notify.RelativeMouse.Requested"), InfoBarSeverity.Informational, TimeSpan.FromSeconds(8));
+
     private void ShowNotification(
         string title,
         string message,

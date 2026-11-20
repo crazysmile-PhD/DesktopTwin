@@ -53,7 +53,7 @@ internal sealed class SessionLaunchChannel : IDisposable
 
     internal async Task LaunchAndConfirmAsync(string path, string arguments, string directory,
         CancellationToken cancellationToken,
-        int observationMilliseconds = SessionLaunchProtocol.ObservationMilliseconds)
+        int observationMilliseconds = SessionLaunchProtocol.ObservationMilliseconds, bool requireWindow = true)
     {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         budget.CancelAfter(observationMilliseconds + 5000);
@@ -66,7 +66,7 @@ internal sealed class SessionLaunchChannel : IDisposable
                 using var writer = new BinaryWriter(_pipe, Encoding.UTF8, leaveOpen: true);
                 using var reader = new BinaryReader(_pipe, Encoding.UTF8, leaveOpen: true);
                 SessionLaunchProtocol.WriteRequest(writer, path, arguments, directory, checked((int)_sessionId),
-                    observationMilliseconds);
+                    observationMilliseconds, requireWindow);
                 if (reader.ReadInt32() != SessionLaunchProtocol.Version)
                     throw new IOException("启动代理协议版本不匹配。");
                 var ready = reader.ReadBoolean();
@@ -80,9 +80,9 @@ internal sealed class SessionLaunchChannel : IDisposable
                 if (target.HasExited || session != _sessionId || target.SessionId != session
                     || target.StartTime.ToUniversalTime().Ticks != started
                     || !string.Equals(target.MainModule?.FileName, path, StringComparison.OrdinalIgnoreCase)
-                    || window == 0)
+                    || (requireWindow && window == 0))
                     throw new InvalidOperationException("启动回执与实际目标进程不匹配，未确认启动成功。");
-                AppLog.Info($"已确认会话 {session} 中的 {path} 就绪，PID {pid}，"
+                AppLog.Info($"已确认会话 {session} 中的 {path} {(requireWindow ? "窗口就绪" : "进程创建（能力待握手）")}，PID {pid}，"
                     + $"可响应窗口 0x{window:X}。");
             }, budget.Token).ConfigureAwait(false);
         }
@@ -93,9 +93,12 @@ internal sealed class SessionLaunchChannel : IDisposable
         }
     }
 
-    internal static string EnsureWorkerInstalled(string? baseDirectory = null)
+    internal static string EnsureWorkerInstalled(string? baseDirectory = null) =>
+        EnsureEmbeddedProgram("DesktopTwin.LaunchWorker.exe", baseDirectory);
+
+    internal static string EnsureEmbeddedProgram(string resourceName, string? baseDirectory = null)
     {
-        using var stream = typeof(SessionLaunchChannel).Assembly.GetManifestResourceStream("DesktopTwin.LaunchWorker.exe")
+        using var stream = typeof(SessionLaunchChannel).Assembly.GetManifestResourceStream(resourceName)
             ?? throw new InvalidOperationException("缺少内嵌启动代理。");
         using var memory = new MemoryStream();
         stream.CopyTo(memory);
@@ -104,7 +107,7 @@ internal sealed class SessionLaunchChannel : IDisposable
         var directory = Path.Combine(baseDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DesktopTwin", "LaunchWorker"), hash);
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "DesktopTwin.LaunchWorker.exe");
+        var path = Path.Combine(directory, resourceName);
         if (File.Exists(path))
         {
             if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(File.ReadAllBytes(path)), SHA256.HashData(bytes)))

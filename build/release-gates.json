@@ -21,6 +21,19 @@
       "DesktopTwin.Tests.LocalControlBridgeTests.ClientDisconnectBeforeReplyDoesNotStopTheServer"
     ]
   },
+  "INPUT001": {
+    "description": "Session relative input preserves raw deltas and transitions, releases on lease loss, and authenticates its companion.",
+    "tests": [
+      "DesktopTwin.Tests.RelativeInputTests.RawRelativeMotionIsUnscaledAndAbsoluteDevicesRebaseOnDeviceOrDisplayChange",
+      "DesktopTwin.Tests.RelativeInputTests.MovementCoalescesWithoutReorderingButtonTransitionsOrLosingOverflow",
+      "DesktopTwin.Tests.RelativeInputTests.LeaseRevocationReleasesHeldInputsAndPreventsLateMovement",
+      "DesktopTwin.Tests.RelativeInputTests.OpeningAMenuReleasesButtonsWithoutReleasingItsHeldAltKey",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.RealReceiverReportsItsSessionAndExitsWhenHostDisconnects",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.ReceiverStopsWhenTheHostLeaseExpiresEvenIfTheHostProcessIsAlive",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.ReceiverRejectsWrongParentAndWrongSessionBeforeAcceptingInput",
+      "DesktopTwin.Tests.SessionLaunchIntegrationTests.HeadlessCompanionCreationDoesNotRequireAVisibleWindow"
+    ]
+  },
   "ARCH001": {
     "description": "No service may depend on concrete views; session ports and their owner stay independent of UI and native controls.",
     "tests": [

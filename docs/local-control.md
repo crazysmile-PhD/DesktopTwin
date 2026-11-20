@@ -34,4 +34,6 @@ Start-Process ./DesktopTwin.exe -ArgumentList @('--control-pipe', $pipeName)
 
 `relativeAccepted` 只代表连接前属性写入；`relativeReadback` 是登录后回读；`relativeReported` 是 RDP 模式变化回调。任意一个值都不能单独证明游戏转视角可用。对照普通桌面点击、Alt 菜单点击与未按 Alt 的视角变化，记录实际截图与状态，才能判断输入在哪一层失败。
 
+会话内输入通道启用后，原生 RDP 保持绝对模式，上述旧字段不代表新通道状态。查询 `sessionInput.ready/captured/rawMoves/status.injectedMoves`；`mouse` 在捕获时直接把相对位移送入同一输入队列，`key` 在通道就绪时由会话内接收端执行。自动测试位移不能替代物理鼠标的 WM_INPUT 捕获验证。Alt 点击先把 Alt 送入会话，最多等待 1200 毫秒确认远端光标可见且捕获已释放，再使用坐标点击；未确认时返回错误，避免把菜单点击变成游戏攻击。
+
 接口依据：[命名管道选项](https://learn.microsoft.com/en-us/dotnet/api/system.io.pipes.pipeoptions)、[断开时丢弃未读数据](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-disconnectnamedpipe)、[SendInput 与 UIPI](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)。

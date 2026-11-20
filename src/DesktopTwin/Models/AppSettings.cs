@@ -116,7 +116,7 @@ public sealed record SessionSettings
     public bool AudioMuted { get; init; }
 
     /// <summary>
-    /// 实验性原生相对鼠标，默认关闭。切换需重连；要求支持该能力的 RDP 控件和服务器。
+    /// 实验性会话内游戏鼠标，默认关闭。切换需重连；捕获与输入接收端随连接存活。
     /// </summary>
     public bool RelativeMouseMode { get; init; }
 

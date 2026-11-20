@@ -110,6 +110,7 @@ public partial class MainWindow : FluentWindow
     /// 承载 RDP ActiveX 的宿主控件。
     /// </summary>
     internal RdpActiveXHost RdpHost { get; } = new();
+    internal RelativeInputController RelativeInput { get; }
 
     /// <summary>
     /// 是否允许直接关闭窗口（应用退出或服务主动关闭时为 true）。
@@ -155,6 +156,7 @@ public partial class MainWindow : FluentWindow
         _displayConfirmationTimer.Tick += OnDisplayConfirmationTick;
         DesktopArea.SizeChanged += OnDesktopAreaSizeChanged;
         RdpHost.LoginCompleted += OnDisplayLoginCompleted;
+        RelativeInput = new RelativeInputController(this, settings);
 
         // Topmost 由 XAML 里的 OneWay 绑定驱动（MainWindow.xaml:20），
         // ViewModel 构造时已用设置里的值初始化 IsTopmost。
@@ -234,6 +236,7 @@ public partial class MainWindow : FluentWindow
         _displayConfirmationTimer?.Stop();
         DesktopArea.SizeChanged -= OnDesktopAreaSizeChanged;
         RdpHost.LoginCompleted -= OnDisplayLoginCompleted;
+        RelativeInput.Dispose();
 
         RdpFormsHost.Child = null;
         _rdpContainer.Dispose();

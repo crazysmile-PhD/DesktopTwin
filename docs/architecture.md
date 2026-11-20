@@ -69,6 +69,12 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 
 ## 后台工作与状态
 
+游戏相对输入由 `RelativeInputController` 持有：前台、控制模式、画面内指针和远端隐藏光标共同决定捕获。捕获期间对子窗口原生输入进行替换，只发送 Raw Input 位移；普通坐标继续由 RDP 处理。Raw Input 的注册仅有一个进程内所有者，退出捕获时有条件恢复原注册；失焦释放自己的 ClipCursor，不覆盖其他应用取得的限制。
+
+`RelativeInputSession` 持有一个当前用户、同提升级别的管道，核对接收端 PID、路径、用户和会话。接收端为嵌入的 Framework 小程序，通过既有临时任务/启动代理进入会话；先查验任务删除再创建接收端。无窗口创建回执只证明进程创建，随后必须完成接收端自己的握手。启动确认期间发送未授权心跳，避免首次确认延迟耗尽活动输入租约。主 UI 的授权 250ms 过期；接收端活动心跳 1500ms 超时即关闭并释放输入。队列有界，仅合并相邻移动，按钮和按键保持顺序，过载断开而不静默丢弃释放。
+
+此通道不创建自启项、不安装驱动，也没有任意程序或脚本命令。`InputLease` 在撤销、断线与退出时释放已注入的键/按钮；菜单释放指针按钮而保留诊断端按住的 Alt。API 测试的位移和键可进入同一会话内通道；硬件捕获仍须额外实测。实现参考 [RDPRelativeInput](https://github.com/TKMAX777/RDPRelativeInput)、[Moonlight](https://github.com/moonlight-stream/moonlight-qt/tree/master/app/streaming/input) 与 [GamingAnywhere 5.1.5](https://chuang.zoolab.org/pubs/pdf/2013mmsys.pdf)，以 C# 独立实现；没有引入其二进制或驱动。
+
 显式传入 `--control-pipe` 时，`App` 持有本地测试桥接并在关闭时取消它。`Diagnostics.LocalControlBridge` 只负责当前用户 ACL、请求边界与协议；`View.DesktopControlTarget` 在 Dispatcher 上调用既有命令、读取状态和核对前台/输入焦点，`Interop.DiagnosticInput` 提供有限的原生输入。普通启动没有监听器。协议与实际验证边界见[本地交互测试桥接](local-control.md)。
 
 - 状态采样仍为 UI 上每 500ms 一次；只在发布快照变化时触发 `StateChanged`。

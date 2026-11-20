@@ -1,4 +1,7 @@
 {
+  "DesktopTwin.Input.InputLease": { "line": 0.95, "branch": 0.85 },
+  "DesktopTwin.Input.InputPacketQueue": { "line": 0.95, "branch": 0.85 },
+  "DesktopTwin.Input.RawMouseDeltas": { "line": 0.95, "branch": 0.85 },
   "DesktopTwin.Models.AppSettingsNormalizer": { "line": 0.90, "branch": 0.85 },
   "DesktopTwin.Services.DiagnosticIssueHistory": { "line": 0.95, "branch": 0.90 },
   "DesktopTwin.Services.AsyncSnapshotRefresh`1": { "line": 0.90, "branch": 0.80, "asyncMethods": ["RunAsync"] },
