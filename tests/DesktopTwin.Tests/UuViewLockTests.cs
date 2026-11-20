@@ -264,6 +264,72 @@ public sealed class UuViewLockTests
         Assert.Equal(new[] { UuViewTarget.Child }, harness.Requests);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SelfGeneratedEventsStopAfterThreeUnstableAttempts(bool reportedSuccess)
+    {
+        var harness = new Harness();
+        harness.Complete = () =>
+        {
+            harness.Changed();
+            return Task.FromResult(new UuViewSwitchService.Result(reportedSuccess, "wrong session"));
+        };
+        using var service = harness.Create();
+        var failures = 0;
+        service.MonitoringFailed += (_, _) => failures++;
+        service.SetEnabled(true, true);
+        harness.Flush();
+        Assert.Equal(3, harness.Requests.Count);
+        Assert.Equal(1, failures);
+        Assert.Equal(1, harness.Disposals);
+        Assert.Empty(harness.Queue);
+        harness.Changed();
+        harness.Flush();
+        Assert.Equal(3, harness.Requests.Count);
+    }
+
+    [Fact]
+    public void BusyCorrectionIsRetriedAtIdleWithoutAnotherSessionEvent()
+    {
+        var harness = new Harness { Complete = () => Task.FromResult(
+            new UuViewSwitchService.Result(false, "busy", Deferred: true)) };
+        using var service = harness.Create();
+        service.SetEnabled(true, true);
+        harness.Flush();
+        Assert.Single(harness.Requests);
+        Assert.Empty(harness.Queue);
+        harness.Complete = () => Task.FromResult(new UuViewSwitchService.Result(true, "done"));
+        service.NotifyOperationIdle();
+        harness.Flush();
+        Assert.Equal(2, harness.Requests.Count);
+    }
+
+    [Fact]
+    public async Task BackoffPreventsEventsFromStartingOverlappingCorrections()
+    {
+        var backoff = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requests = 0;
+        var drift = false;
+        Action changed = () => { };
+        var queued = new Queue<Action>();
+        using var service = new UuViewLockService(() => UuViewTarget.Host, _ => drift,
+            (_, _) => { requests++; return Task.FromResult(new UuViewSwitchService.Result(false, "test")); },
+            (callback, _) => { changed = callback; return new Subscription(() => { }); },
+            queued.Enqueue, (_, token) => backoff.Task.WaitAsync(token));
+        service.SetEnabled(true, true);
+        queued.Dequeue()();
+        drift = true;
+        var pending = service.CheckAsync();
+        for (var i = 0; i < 100; i++) changed();
+        await service.CheckAsync();
+        Assert.Equal(1, requests);
+        Assert.Empty(queued);
+        backoff.SetResult();
+        await pending;
+        Assert.Single(queued);
+    }
+
     private sealed class Harness
     {
         internal UuViewTarget Current = UuViewTarget.Child;
@@ -295,7 +361,8 @@ public sealed class UuViewLockTests
                 Subscriptions++;
                 Subscribing();
                 return new Subscription(() => Disposals++);
-            }, Queue.Enqueue);
+            }, Queue.Enqueue, (_, token) => token.IsCancellationRequested
+                ? Task.FromCanceled(token) : Task.CompletedTask);
 
         internal void Flush()
         {

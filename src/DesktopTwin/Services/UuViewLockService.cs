@@ -16,6 +16,11 @@ internal sealed class UuViewLockService : IDisposable
     private readonly Func<UuViewTarget> _captureTarget;
     private readonly Func<UuViewTarget, bool> _needsCorrection;
     private readonly Func<UuViewTarget, CancellationToken, Task<UuViewSwitchService.Result>> _ensureTarget;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private UuViewSwitchService? _switchService;
+    private bool _waitingForIdle;
+    private bool _manualOperationActive;
+    private int _attempts;
     private UuViewTarget? _target;
     private bool _switchMode;
     private CancellationTokenSource? _switchCts;
@@ -32,6 +37,8 @@ internal sealed class UuViewLockService : IDisposable
             (changed, failed) => new UuViewChangeMonitor(dispatcher, changed, failed),
             action => dispatcher.BeginInvoke(DispatcherPriority.Background, action))
     {
+        _switchService = switchService;
+        switchService.BecameIdle += OnOperationIdle;
     }
 
     internal UuViewLockService(
@@ -39,13 +46,15 @@ internal sealed class UuViewLockService : IDisposable
         Func<UuViewTarget, bool> needsCorrection,
         Func<UuViewTarget, CancellationToken, Task<UuViewSwitchService.Result>> ensureTarget,
         Func<Action, Action<Exception>, IDisposable> subscribe,
-        Action<Action> schedule)
+        Action<Action> schedule,
+        Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         _captureTarget = captureTarget;
         _needsCorrection = needsCorrection;
         _ensureTarget = ensureTarget;
         _subscribe = subscribe;
         _schedule = schedule;
+        _delay = delay ?? Task.Delay;
     }
 
     internal void SetEnabled(bool enabled, bool switchEnabled)
@@ -59,6 +68,8 @@ internal sealed class UuViewLockService : IDisposable
         }
 
         _checkPending = false;
+        _waitingForIdle = false;
+        _attempts = 0;
         _switchCts?.Cancel();
         _switchMode = switchEnabled;
         _target = null;
@@ -96,9 +107,11 @@ internal sealed class UuViewLockService : IDisposable
             return;
         }
 
+        _attempts = 0;
+        _waitingForIdle = false;
+        _switchCts?.Cancel();
         if (_target != target)
         {
-            _switchCts?.Cancel();
             _target = target;
             AppLog.Info($"UU 视角锁定：记录目标更新为 {target}。");
         }
@@ -115,7 +128,7 @@ internal sealed class UuViewLockService : IDisposable
         }
 
         _checkPending = true;
-        if (_switchCts is null && !_checkQueued)
+        if (_switchCts is null && !_checkQueued && !_waitingForIdle && !_manualOperationActive)
         {
             _checkQueued = true;
             _schedule(async () =>
@@ -129,6 +142,25 @@ internal sealed class UuViewLockService : IDisposable
         }
     }
 
+    private void OnOperationIdle(object? sender, EventArgs e) => _schedule(NotifyOperationIdle);
+
+    /// <summary>用户操作优先：暂停事件纠正，取消在途纠正，结束后再统一观察。</summary>
+    internal void SetManualOperationActive(bool active)
+    {
+        if (_disposed) return;
+        _manualOperationActive = active;
+        if (active) _switchCts?.Cancel();
+        else NotifyOperationIdle();
+    }
+
+    /// <summary>忙碌请求保留到真正的操作空闲边界，不在 UI 上空转重试。</summary>
+    internal void NotifyOperationIdle()
+    {
+        if (_disposed) return;
+        _waitingForIdle = false;
+        RequestCheck();
+    }
+
     private void OnMonitoringFailed(Exception exception)
     {
         if (!_disposed && _target.HasValue)
@@ -140,7 +172,7 @@ internal sealed class UuViewLockService : IDisposable
 
     internal async Task CheckAsync()
     {
-        if (_disposed || _switchCts is not null || _target is not { } target)
+        if (_disposed || _manualOperationActive || _switchCts is not null || _target is not { } target)
         {
             return;
         }
@@ -153,14 +185,40 @@ internal sealed class UuViewLockService : IDisposable
         {
             if (!_needsCorrection(target))
             {
+                _attempts = 0;
                 return;
             }
 
             AppLog.Info($"UU 视角锁定：串流端偏离 {target}，自动切回。");
             var result = await _ensureTarget(target, cts.Token).ConfigureAwait(true);
+            if (cts.IsCancellationRequested) return;
+            if (result.Deferred)
+            {
+                _waitingForIdle = true;
+                _checkPending = true;
+                return;
+            }
+            _attempts++;
+            if (!_needsCorrection(target))
+            {
+                _attempts = 0;
+                _checkPending = false;
+                return;
+            }
+            if (_attempts >= 3)
+            {
+                OnMonitoringFailed(new InvalidOperationException("连续三次纠正后目标仍不稳定，已停止自动切换。"));
+                return;
+            }
             if (!result.Success && !cts.IsCancellationRequested)
             {
-                AppLog.Warn($"UU 视角锁定：自动切回未成功（{result.Message}），等待后续变更通知。");
+                AppLog.Warn($"UU 视角锁定：第 {_attempts} 次纠正未成功（{result.Message}）。");
+            }
+            if (!result.Success || _checkPending)
+            {
+                _checkPending = false;
+                await _delay(TimeSpan.FromSeconds(5 * _attempts), cts.Token).ConfigureAwait(true);
+                _checkPending = true;
             }
             // 不从纠正结果更新基线，旧配置完成后也不会覆盖新配置。
         }
@@ -171,11 +229,12 @@ internal sealed class UuViewLockService : IDisposable
         catch (Exception exception)
         {
             AppLog.Warn("UU 视角锁定：自动切回出错。", exception);
+            if (++_attempts >= 3) OnMonitoringFailed(exception);
         }
         finally
         {
             _switchCts = null;
-            if (_checkPending)
+            if (_checkPending && !_waitingForIdle)
             {
                 RequestCheck();
             }
@@ -193,5 +252,8 @@ internal sealed class UuViewLockService : IDisposable
         _checkPending = false;
         _switchCts?.Cancel();
         _subscription?.Dispose();
+        if (_switchService is { } switchService)
+            switchService.BecameIdle -= OnOperationIdle;
+        _switchService = null;
     }
 }

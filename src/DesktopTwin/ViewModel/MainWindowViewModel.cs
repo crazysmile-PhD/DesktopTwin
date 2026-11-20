@@ -182,9 +182,6 @@ public partial class MainWindowViewModel : ObservableObject
         _sessionAgent.SwitchRequested += OnSessionAgentSwitchRequested;
         _sessionAgent.HealthCheckRequested += OnAgentHealthCheckRequested;
 
-        // 切换后串流端被自动恢复成功时告诉用户一声，免得用户以为得手动重连。
-        _uuViewSwitchService.StreamerRecovered += OnStreamerRecovered;
-
         _notificationTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(5)
@@ -636,36 +633,6 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 串流端被后台恢复循环成功拉起。
-    /// </summary>
-    private void OnStreamerRecovered(object? sender, EventArgs e)
-    {
-        void Notify()
-        {
-            _uuViewLockService.RequestCheck();
-            ShowNotification(
-                Locale.Get("Uu.Recovered.Title"),
-                Locale.Get("Uu.Recovered.Message"),
-                InfoBarSeverity.Success,
-                TimeSpan.FromSeconds(8));
-        }
-
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null)
-        {
-            return;
-        }
-
-        if (!dispatcher.CheckAccess())
-        {
-            _ = dispatcher.BeginInvoke(new Action(Notify));
-            return;
-        }
-
-        Notify();
-    }
-
-    /// <summary>
     /// 在分身中立即启动当前目标程序。
     /// </summary>
     [RelayCommand]
@@ -751,7 +718,6 @@ public partial class MainWindowViewModel : ObservableObject
         _sessionAgent.SwitchRequested -= OnSessionAgentSwitchRequested;
         _sessionAgent.HealthCheckRequested -= OnAgentHealthCheckRequested;
         _sessionAgent.Dispose();
-        _uuViewSwitchService.StreamerRecovered -= OnStreamerRecovered;
         _uuViewLockService.MonitoringFailed -= OnUuViewLockMonitoringFailed;
         _uuViewLockService.Dispose();
         _uuViewSwitchService.Dispose();
@@ -773,6 +739,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         _uuSwitchInProgress = true;
+        _uuViewLockService.SetManualOperationActive(true);
         try
         {
             ShowNotification(
@@ -794,7 +761,7 @@ public partial class MainWindowViewModel : ObservableObject
         finally
         {
             _uuSwitchInProgress = false;
-            _uuViewLockService.RequestCheck();
+            _uuViewLockService.SetManualOperationActive(false);
         }
     }
 
@@ -810,6 +777,7 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         _uuSwitchInProgress = true;
+        _uuViewLockService.SetManualOperationActive(true);
         try
         {
             // 「正在切换」要贯穿整个切换过程（断开、杀串流端、等 UU 重新挑会话，
@@ -857,7 +825,7 @@ public partial class MainWindowViewModel : ObservableObject
         finally
         {
             _uuSwitchInProgress = false;
-            _uuViewLockService.RequestCheck();
+            _uuViewLockService.SetManualOperationActive(false);
         }
     }
 
@@ -890,7 +858,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void OnUuViewLockMonitoringFailed(object? sender, Exception exception)
     {
-        AppLog.Warn("UU 视角锁定事件监听失败。", exception);
+        AppLog.Warn("UU 视角锁定停止：监听或纠正失败。", exception);
         UuViewLockEnabled = false;
         _settings.Current.Automation.UuViewLockEnabled = false;
         _settings.SaveSoon();

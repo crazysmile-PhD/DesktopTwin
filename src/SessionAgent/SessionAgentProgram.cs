@@ -172,35 +172,24 @@ namespace DesktopTwinSessionAgent
         }
 
         /// <summary>
-        /// 命中热键：先在分身画面里弹提示，再延迟 1.6 秒写请求。
-        ///
-        /// 延迟是必须的：主端一收到请求就断开会话，分身画面连同提示一起消失，
-        /// 用户看到的只会是「按了没反应」。
+        /// 命中热键后立即写请求；主端在执行期间显示切换状态。
         /// </summary>
         private static void OnHotkeyPressed()
         {
-            Log("热键命中，弹提示并延迟通知主端");
+            Log("热键命中，立即通知主端");
             ShowHud("已收到热键，正在切换视角…", 2500);
 
-            var delay = new System.Windows.Forms.Timer();
-            delay.Interval = 1600;
-            delay.Tick += delegate
+            try
             {
-                delay.Stop();
-                delay.Dispose();
-                try
-                {
-                    long ts = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
-                    string json = "{\"ts\": " + ts.ToString() + ", \"source\": \"session-agent\"}";
-                    File.WriteAllText(_requestPath, json, new UTF8Encoding(false));
-                    Log("切换请求已写入");
-                }
-                catch (Exception ex)
-                {
-                    Log("写请求失败: " + ex.Message);
-                }
-            };
-            delay.Start();
+                long ts = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+                string json = "{\"ts\": " + ts.ToString() + ", \"source\": \"session-agent\"}";
+                File.WriteAllText(_requestPath, json, new UTF8Encoding(false));
+                Log("切换请求已写入");
+            }
+            catch (Exception ex)
+            {
+                Log("写请求失败: " + ex.Message);
+            }
         }
 
         /// <summary>

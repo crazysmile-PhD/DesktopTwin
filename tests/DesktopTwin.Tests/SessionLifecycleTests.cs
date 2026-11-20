@@ -59,7 +59,7 @@ public sealed class SessionLifecycleTests
         (target.GetType().GetMethod(name, Private) ?? throw new MissingMethodException(name)).Invoke(target, args)
         ?? Task.CompletedTask;
 
-    private static Task RunOnStaAsync(Func<Task> body)
+    internal static Task RunOnStaAsync(Func<Task> body)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
