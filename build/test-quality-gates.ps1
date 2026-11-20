@@ -36,6 +36,20 @@ try {
     Set-Content -LiteralPath $policy -Value '{"Missing.Class":{"line":0.9,"branch":0.8}}' -Encoding UTF8
     Assert-Rejected { & $gate -ResultsDirectory $directory -PolicyPath $policy }
     Write-Host 'Quality gate negative checks passed.'
+
+    $releaseGate = Join-Path $PSScriptRoot 'verify-release-gates.ps1'
+    Set-Content -LiteralPath $policy -Value '{"EXAMPLE001":{"description":"required evidence","tests":["Example.Required"]}}' -Encoding UTF8
+    Set-Content -LiteralPath $trx -Value '<TestRun><Results><UnitTestResult testName="Example.Renamed" outcome="Passed" /></Results></TestRun>' -Encoding UTF8
+    Assert-Rejected { & $releaseGate -ResultsDirectory $directory -PolicyPath $policy }
+    Set-Content -LiteralPath $trx -Value '<TestRun><Results><UnitTestResult testName="Example.Required" outcome="NotExecuted" /></Results></TestRun>' -Encoding UTF8
+    Assert-Rejected { & $releaseGate -ResultsDirectory $directory -PolicyPath $policy }
+    Set-Content -LiteralPath $trx -Value '<TestRun><Results><UnitTestResult testName="Example.Required" outcome="Failed" /></Results></TestRun>' -Encoding UTF8
+    Assert-Rejected { & $releaseGate -ResultsDirectory $directory -PolicyPath $policy }
+    Set-Content -LiteralPath $trx -Value '<TestRun><Results><UnitTestResult testName="Example.Required" outcome="Passed" /></Results></TestRun>' -Encoding UTF8
+    & $releaseGate -ResultsDirectory $directory -PolicyPath $policy
+    Set-Content -LiteralPath $policy -Value '{"EXAMPLE001":{"description":"empty gate","tests":[]}}' -Encoding UTF8
+    Assert-Rejected { & $releaseGate -ResultsDirectory $directory -PolicyPath $policy }
+    Write-Host 'Registered release gate negative checks passed.'
 }
 finally {
     # Remove only these explicitly created files, without recursively deleting a computed path.

@@ -27,14 +27,30 @@ public sealed class ArchitectureTests
     }
 
     [Fact]
-    public void NewServicesCannotDependOnConcreteViews()
+    public void NoServiceCanDependOnConcreteViews()
     {
-        // Existing composition seams are explicit debt. New services must keep UI outside.
         var result = Types.InAssembly(typeof(AppSettings).Assembly).That()
-            .ResideInNamespace("DesktopTwin.Services")
-            .And().DoNotHaveName(nameof(ChildSessionService))
-            .And().DoNotHaveName(nameof(TrayIconService)).ShouldNot()
+            .ResideInNamespace("DesktopTwin.Services").ShouldNot()
             .HaveDependencyOnAny("DesktopTwin.View", "DesktopTwin.ViewModel").GetResult();
+        Assert.True(result.IsSuccessful, string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void SessionContractsRemainIndependentOfImplementations()
+    {
+        var result = Types.InAssembly(typeof(AppSettings).Assembly).That()
+            .ResideInNamespace("DesktopTwin.Contracts").ShouldNot()
+            .HaveDependencyOnAny("DesktopTwin.Services", "DesktopTwin.View", "DesktopTwin.ViewModel",
+                "DesktopTwin.Interop", "System.Windows").GetResult();
+        Assert.True(result.IsSuccessful, string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void DesktopHostDoesNotDependOnUiOrNativeControl()
+    {
+        var result = Types.InAssembly(typeof(AppSettings).Assembly).That()
+            .HaveName(nameof(DesktopSessionHost)).ShouldNot()
+            .HaveDependencyOnAny("DesktopTwin.View", "DesktopTwin.ViewModel", "DesktopTwin.Interop", "System.Windows").GetResult();
         Assert.True(result.IsSuccessful, string.Join(", ", result.FailingTypeNames ?? []));
     }
 }
