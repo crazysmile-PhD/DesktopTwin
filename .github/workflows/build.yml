@@ -11,11 +11,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: 校验发行标签与程序版本
         if: startsWith(github.ref, 'refs/tags/v')
@@ -28,12 +35,18 @@ jobs:
           }
 
       - name: 安装 .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          dotnet-version: "10.0.x"
+          global-json-file: global.json
 
       - name: 还原
-        run: dotnet restore DesktopTwin.sln
+        run: dotnet restore DesktopTwin.sln --locked-mode
+
+      - name: 编译并测试 Debug（包括原生冒烟项目）
+        run: |
+          dotnet build DesktopTwin.sln -c Debug --no-restore -warnaserror
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test DesktopTwin.sln -c Debug --no-build --no-restore --blame-hang-timeout 2m --results-directory artifacts/debug-test-results --logger "trx;LogFileName=tests.trx" --logger "console;verbosity=normal"
 
       - name: 编译（Release，警告视为错误）
         run: dotnet build DesktopTwin.sln -c Release --no-restore -warnaserror
@@ -47,7 +60,31 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-invariants.ps1
 
       - name: 单元测试
-        run: dotnet test DesktopTwin.sln -c Release --no-build --logger "console;verbosity=normal"
+        run: >
+          dotnet test tests/DesktopTwin.Tests/DesktopTwin.Tests.csproj -c Release --no-build --no-restore
+          --collect:"XPlat Code Coverage" --blame-hang-timeout 2m
+          --results-directory artifacts/test-results
+          --logger "trx;LogFileName=tests.trx" --logger "console;verbosity=normal"
+
+      - name: 验证质量门禁会拒绝不合格结果
+        run: ./build/test-quality-gates.ps1
+
+      - name: 核心覆盖率、零跳过和零空测试门禁
+        run: ./build/verify-test-results.ps1 -ResultsDirectory artifacts/test-results
+
+      - name: 发布门禁：已登记的重构契约
+        run: ./build/verify-release-gates.ps1 -ResultsDirectory artifacts/test-results
+
+      - name: 上传测试及完整应用覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quality-reports
+          path: |
+            artifacts/test-results
+            artifacts/debug-test-results
+          if-no-files-found: error
+          retention-days: 14
 
       # 一次产出两个版本：自带运行时的给普通用户，框架依赖的给已装 .NET 10 的机器。
       - name: 发布（自带运行时）
@@ -58,6 +95,7 @@ jobs:
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=false
           -p:DebugType=none
+          -p:RestoreLockedMode=true
           -o artifacts/publish/standalone
 
       - name: 发布（框架依赖）
@@ -67,6 +105,7 @@ jobs:
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:DebugType=none
+          -p:RestoreLockedMode=true
           -o artifacts/publish/framework
 
       # 发布包只给最终用户看，调试符号既没用又占体积，还会暴露源码路径。
@@ -74,24 +113,38 @@ jobs:
         run: Get-ChildItem artifacts/publish -Filter *.pdb -Recurse | Remove-Item -Force
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: DesktopTwin-win-x64
           path: artifacts/publish
           if-no-files-found: error
 
+  release-gate:
+    if: ${{ always() }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require all registered quality gates
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: test "$BUILD_RESULT" = success
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: windows-latest
+    needs: [build, release-gate]
+    runs-on: windows-2025
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       # 必须先 checkout 再下载产物：actions/checkout 默认 clean=true，
       # 会把工作区里未跟踪的文件（包括刚下载的 artifact）一起清掉。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: DesktopTwin-win-x64
           path: artifacts/publish

@@ -1,7 +1,8 @@
-using System;
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System;
 using Microsoft.Win32.SafeHandles;
 
 namespace DesktopTwin.Localization;
@@ -107,7 +108,7 @@ internal static class LocalizationCommandLine
 
         try
         {
-            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
             var backup = Path.Combine(
                 Path.GetDirectoryName(path) ?? Environment.CurrentDirectory,
                 Path.GetFileNameWithoutExtension(path) + ".bak-" + stamp + Locale.FileExtension);

@@ -1,9 +1,10 @@
-﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Security;
 using System.Text;
+using System;
 using DesktopTwin.Interop;
 using DesktopTwin.Localization;
 using Microsoft.Win32;
@@ -354,7 +355,7 @@ public static partial class ChildSessionEnvironmentCheck
     /// 不能拿它当「干净」的证据——那会让标记提前释放，之后浅扫漏掉子树里的任务。
     /// </param>
     private static void ReleaseStickyDeepScanIfClean(
-        IReadOnlyList<ToolPersistenceHit> hits,
+        List<ToolPersistenceHit> hits,
         bool freshDeepScan,
         bool taskScanIncomplete,
         bool runScanIncomplete,
@@ -693,8 +694,8 @@ public static partial class ChildSessionEnvironmentCheck
             "Check.ServiceKey.Title",
             "Check.ServiceKey.InactiveSummary",
             "Check.ServiceKey.InactiveDetail",
-            deviations.Count == 0 ? Locale.Get("Check.None") : deviations.Count.ToString(),
-            deviations.Count == 0 ? Locale.Get("Check.None") : deviations.Count.ToString(),
+            deviations.Count == 0 ? Locale.Get("Check.None") : deviations.Count.ToString(CultureInfo.InvariantCulture),
+            deviations.Count == 0 ? Locale.Get("Check.None") : deviations.Count.ToString(CultureInfo.InvariantCulture),
             blocking: true);
 
         var persistence = GetToolPersistenceHits();
@@ -707,7 +708,7 @@ public static partial class ChildSessionEnvironmentCheck
             ? Locale.Get("Check.Persistence.Unreadable")
             : scanIncomplete
                 ? Locale.Format("Check.Persistence.Incomplete", persistence.Count)
-                : persistence.Count.ToString();
+                : persistence.Count.ToString(CultureInfo.InvariantCulture);
 
         AddOrInactive(
             all, active,
@@ -740,8 +741,8 @@ public static partial class ChildSessionEnvironmentCheck
             "Check.RdpSecurity.Title",
             "Check.RdpSecurity.InactiveSummary",
             "Check.RdpSecurity.InactiveDetail",
-            downgrades.Count == 0 ? Locale.Get("Check.None") : downgrades.Count.ToString(),
-            downgrades.Count == 0 ? Locale.Get("Check.None") : downgrades.Count.ToString(),
+            downgrades.Count == 0 ? Locale.Get("Check.None") : downgrades.Count.ToString(CultureInfo.InvariantCulture),
+            downgrades.Count == 0 ? Locale.Get("Check.None") : downgrades.Count.ToString(CultureInfo.InvariantCulture),
             blocking: false);
 
         var termsrv = GetTermsrvState();
@@ -926,7 +927,7 @@ public static partial class ChildSessionEnvironmentCheck
     /// </summary>
     /// <param name="includeMicrosoftSubtree">是否连系统子树的任务内容一起读（深扫）。</param>
     /// <param name="incomplete">有目录被拒绝访问时置 true，调用方据此提示「扫描不完整」。</param>
-    private static IReadOnlyList<ToolPersistenceHit> ScanScheduledTasks(
+    private static List<ToolPersistenceHit> ScanScheduledTasks(
         bool includeMicrosoftSubtree,
         out bool incomplete)
     {
@@ -1026,7 +1027,7 @@ public static partial class ChildSessionEnvironmentCheck
     /// <summary>
     /// 扫描自启项（Run / RunOnce / 策略 Run，含其它已加载用户的 HKCU）。
     /// </summary>
-    private static IReadOnlyList<ToolPersistenceHit> GetRunKeyHits(out bool incomplete)
+    private static List<ToolPersistenceHit> GetRunKeyHits(out bool incomplete)
     {
         var hits = new List<ToolPersistenceHit>();
         incomplete = false;
@@ -1166,8 +1167,8 @@ public static partial class ChildSessionEnvironmentCheck
             return false;
         }
 
-        return expanded.IndexOf("-k", StringComparison.OrdinalIgnoreCase) >= 0
-               && expanded.IndexOf("NetworkService", StringComparison.OrdinalIgnoreCase) >= 0;
+        return expanded.Contains("-k", StringComparison.OrdinalIgnoreCase)
+               && expanded.Contains("NetworkService", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool Contains(string[] values, string expected)

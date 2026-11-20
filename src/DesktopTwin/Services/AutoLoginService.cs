@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -8,6 +8,7 @@ using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Automation;
+using DesktopTwin.Credentials;
 using DesktopTwin.Interop;
 using DesktopTwin.Models;
 using Microsoft.Win32;
@@ -101,6 +102,7 @@ internal sealed class AutoLoginService : IDisposable
     private static readonly TimeSpan WatchDuration = TimeSpan.FromSeconds(60);
 
     private readonly SettingsService _settings;
+    private readonly AccountCredentialStore _credentials;
     private CancellationTokenSource? _watchCancellation;
     private IntPtr _lastFilledDialog;
     private bool _disposed;
@@ -112,6 +114,8 @@ internal sealed class AutoLoginService : IDisposable
     public AutoLoginService(SettingsService settings)
     {
         _settings = settings;
+        _credentials = new AccountCredentialStore(settings.Current.Automation, () => Environment.UserName,
+            DpapiProtector.Protect, DpapiProtector.Unprotect, settings.SaveSoon);
     }
 
     /// <summary>
@@ -125,121 +129,46 @@ internal sealed class AutoLoginService : IDisposable
     /// 多账户：本机可能用不同账户登录桌面分身，每个账户的密码单独存一份，
     /// 这里只回答「当前这次连接要用的那个账户，有没有存过密码」。
     /// </summary>
-    public bool HasStoredPassword => !string.IsNullOrEmpty(ReadPassword());
+    public bool HasStoredPassword => !string.IsNullOrEmpty(_credentials.ReadPassword());
 
     /// <summary>
     /// 自动登录使用的用户名。留空时取当前 Windows 账户。
     /// </summary>
-    public string UserName
-    {
-        get
-        {
-            var configured = _settings.Current.Automation.AutoLoginUserName;
-            return string.IsNullOrWhiteSpace(configured) ? Environment.UserName : configured.Trim();
-        }
-    }
+    public string UserName => _credentials.UserName;
 
     /// <summary>
     /// 当前账户在密码表里的键。用户名不区分大小写。
     /// </summary>
-    public string AccountKey => UserName.ToLowerInvariant();
+    public string AccountKey => _credentials.AccountKey;
 
     /// <summary>
     /// 自动登录使用的域。本地账户就是机器名。
     /// </summary>
-    public string Domain => Environment.UserDomainName;
+    public static string Domain => Environment.UserDomainName;
 
     /// <summary>
     /// 已经存过密码的账户列表（用于设置界面展示，不含任何密码信息）。
     /// </summary>
-    public IReadOnlyList<string> StoredAccountNames
-    {
-        get
-        {
-            var passwords = _settings.Current.Automation.AutoLoginPasswords;
-            var names = new List<string>(passwords.Count);
-            foreach (var pair in passwords)
-            {
-                if (!string.IsNullOrWhiteSpace(pair.Key))
-                {
-                    names.Add(pair.Key);
-                }
-            }
-
-            names.Sort(StringComparer.OrdinalIgnoreCase);
-            return names;
-        }
-    }
+    public IReadOnlyList<string> StoredAccountNames => _credentials.StoredAccountNames;
 
     /// <summary>
     /// 指定账户是否存过密码。
     /// </summary>
     /// <param name="userName">账户名（不区分大小写）。</param>
-    public bool HasStoredPasswordFor(string userName)
-    {
-        return FindAccountKey(userName) is not null;
-    }
+    public bool HasStoredPasswordFor(string userName) => _credentials.HasStoredPasswordFor(userName);
 
-    /// <summary>
-    /// 保存密码（DPAPI 加密后写进设置）。只影响当前账户，不动其它账户的记录。
-    /// </summary>
-    /// <returns>加密失败时返回 false。</returns>
+    /// <summary>保存当前账户的加密密码；保护失败不修改现有记录。</summary>
     public bool SavePassword(string plainText)
     {
         ThrowIfDisposed();
-        var protectedValue = DpapiProtector.Protect(plainText);
-        if (protectedValue is null)
-        {
-            return false;
-        }
-
-        var passwords = _settings.Current.Automation.AutoLoginPasswords;
-
-        // 同一个账户可能以不同大小写存在过（账户名改过大小写、或从旧文件读回来），
-        // 先删掉忽略大小写等价的那一条，避免同一个账户堆出两份密码。
-        var existing = FindAccountKey(AccountKey);
-        if (existing is not null)
-        {
-            passwords.Remove(existing);
-        }
-
-        passwords[UserName] = protectedValue;
-        _settings.SaveSoon();
-        return true;
+        return _credentials.SavePassword(plainText);
     }
 
-    /// <summary>
-    /// 清除「当前账户」已保存的密码；其它账户的记录保留。
-    /// </summary>
+    /// <summary>清除当前账户密码，保留其它账户和在途读者的快照。</summary>
     public void ClearPassword()
     {
         ThrowIfDisposed();
-        var existing = FindAccountKey(AccountKey);
-        if (existing is not null && _settings.Current.Automation.AutoLoginPasswords.Remove(existing))
-        {
-            _settings.SaveSoon();
-        }
-    }
-
-    /// <summary>
-    /// 在密码表里找与给定账户名忽略大小写相等的键。
-    /// </summary>
-    private string? FindAccountKey(string userName)
-    {
-        if (string.IsNullOrWhiteSpace(userName))
-        {
-            return null;
-        }
-
-        foreach (var key in _settings.Current.Automation.AutoLoginPasswords.Keys)
-        {
-            if (string.Equals(key, userName.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                return key;
-            }
-        }
-
-        return null;
+        _credentials.ClearPassword();
     }
 
     /// <summary>
@@ -298,7 +227,7 @@ internal sealed class AutoLoginService : IDisposable
     /// <param name="domain">域；本地账户留空即可，微软账户用 MicrosoftAccount。</param>
     /// <param name="password">密码。</param>
     /// <param name="errorCode">Win32 错误码，成功时为 0。</param>
-    public PasswordCheckResult VerifyPassword(
+    public static PasswordCheckResult VerifyPassword(
         string userName,
         string? domain,
         string password,
@@ -367,6 +296,7 @@ internal sealed class AutoLoginService : IDisposable
 
     [DllImport("secur32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1838", Justification = "Bounded Unicode buffer matches the existing Win32 marshalling contract.")]
     private static extern bool GetUserNameEx(
         int nameFormat,
         System.Text.StringBuilder userName,
@@ -439,7 +369,8 @@ internal sealed class AutoLoginService : IDisposable
             {
                 try
                 {
-                    NetApiBufferFree(buffer);
+                    // Cleanup is best effort; its status must not replace the join-query result.
+                    _ = NetApiBufferFree(buffer);
                 }
                 catch (DllNotFoundException)
                 {
@@ -560,7 +491,7 @@ internal sealed class AutoLoginService : IDisposable
             return false;
         }
 
-        var password = ReadPassword();
+        var password = _credentials.ReadPassword();
         if (string.IsNullOrEmpty(password))
         {
             return false;
@@ -579,7 +510,7 @@ internal sealed class AutoLoginService : IDisposable
     /// 只读状态，不读密码：那个值在注册表里是可还原的，程序没有任何理由去碰它。
     /// </summary>
     /// <param name="userName">已配置的默认登录账户；读不到时为空串。</param>
-    public bool IsSystemAutoLoginEnabled(out string userName)
+    public static bool IsSystemAutoLoginEnabled(out string userName)
     {
         userName = string.Empty;
 
@@ -614,7 +545,7 @@ internal sealed class AutoLoginService : IDisposable
     /// </summary>
     /// <param name="error">失败原因。</param>
     /// <returns>成功拉起进程返回 true。</returns>
-    public bool TryOpenSystemAutoLoginSettings(out string error)
+    public static bool TryOpenSystemAutoLoginSettings(out string error)
     {
         error = string.Empty;
 
@@ -773,7 +704,7 @@ internal sealed class AutoLoginService : IDisposable
             return false;
         }
 
-        var password = ReadPassword();
+        var password = _credentials.ReadPassword();
         if (string.IsNullOrEmpty(password))
         {
             return false;
@@ -1038,25 +969,9 @@ internal sealed class AutoLoginService : IDisposable
         }
     }
 
-    private string? ReadPassword()
-    {
-        var passwords = _settings.Current.Automation.AutoLoginPasswords;
-        var key = FindAccountKey(AccountKey);
-        if (key is null || !passwords.TryGetValue(key, out var protectedValue)
-            || string.IsNullOrWhiteSpace(protectedValue))
-        {
-            return null;
-        }
-
-        return DpapiProtector.Unprotect(protectedValue);
-    }
-
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(AutoLoginService));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }
 

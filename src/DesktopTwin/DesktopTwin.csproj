@@ -3,6 +3,9 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0-windows</TargetFramework>
+		<RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+		<!-- Keep single-file analyzer dependencies identical during restore and publish. -->
+		<EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
 		<RootNamespace>DesktopTwin</RootNamespace>
 		<AssemblyName>DesktopTwin</AssemblyName>
 		<UseWPF>true</UseWPF>
@@ -58,7 +61,7 @@
 		<Error Condition="!Exists('$(SessionLaunchCompiler)')"
 		       Text="找不到 .NET Framework 的编译器，无法构建程序启动代理。" />
 		<MakeDir Directories="$(IntermediateOutputPath)" />
-		<Exec Command="&quot;$(SessionLaunchCompiler)&quot; /nologo /target:winexe /optimize+ /win32manifest:&quot;$(SessionLaunchManifest)&quot; /win32icon:&quot;$(SessionLaunchIcon)&quot; /out:&quot;$(SessionLaunchOutput)&quot; /reference:System.dll /reference:System.Core.dll &quot;$(SessionLaunchSource)&quot; &quot;$(SessionLaunchWorkerSource)&quot; &quot;$(SessionLaunchProtocolSource)&quot;" />
+		<Exec Command="&quot;$(SessionLaunchCompiler)&quot; /nologo /warn:4 /warnaserror+ /target:winexe /optimize+ /win32manifest:&quot;$(SessionLaunchManifest)&quot; /win32icon:&quot;$(SessionLaunchIcon)&quot; /out:&quot;$(SessionLaunchOutput)&quot; /reference:System.dll /reference:System.Core.dll &quot;$(SessionLaunchSource)&quot; &quot;$(SessionLaunchWorkerSource)&quot; &quot;$(SessionLaunchProtocolSource)&quot;" />
 
 		<ItemGroup>
 			<EmbeddedResource Include="$(SessionLaunchOutput)" LogicalName="DesktopTwin.LaunchWorker.exe" />

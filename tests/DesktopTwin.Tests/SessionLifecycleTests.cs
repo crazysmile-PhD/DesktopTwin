@@ -15,7 +15,7 @@ public sealed class SessionLifecycleTests
     public Task ExitJoinsTheAcceptedRequestWithoutWaitingForWindowsCleanup() => RunOnStaAsync(async () =>
     {
         // 已有注销在途，只替换任务信号；绝不创建窗口或调用真实 WTS 注销。
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var service = CreateServiceSkeleton();
         Set(service, "_dispatcher", Dispatcher.CurrentDispatcher);
         Set(service, "_environmentGate", new object());
         Set(service, "_sessionClosing", true);
@@ -41,7 +41,7 @@ public sealed class SessionLifecycleTests
     [Fact]
     public Task ExitDoesNotTreatRejectedLogoffRequestAsAccepted() => RunOnStaAsync(async () =>
     {
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var service = CreateServiceSkeleton();
         Set(service, "_dispatcher", Dispatcher.CurrentDispatcher);
         var request = new TaskCompletionSource<uint?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var cleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -59,7 +59,7 @@ public sealed class SessionLifecycleTests
         // Never construct or dispose an RDP window: Dispose logs off a real user session.
         using var settings = new SettingsService(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
         using var sessionCancellation = new CancellationTokenSource();
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var service = CreateServiceSkeleton();
         Set(service, "_settings", settings);
         Set(service, "_environmentGate", new object());
         Set(service, "_sessionCancellation", sessionCancellation);
@@ -80,7 +80,7 @@ public sealed class SessionLifecycleTests
     [Fact]
     public void ExpiredStartCannotJoinNewGeneration()
     {
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var service = CreateServiceSkeleton();
         Set(service, "_environmentGate", new object());
         Set(service, "_startOperationGate", new object());
         Set(service, "_startGeneration", 2);
@@ -95,7 +95,7 @@ public sealed class SessionLifecycleTests
     [Fact]
     public void PendingSettingsForNextConnectionAreNotAnActiveReconnect()
     {
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var service = CreateServiceSkeleton();
         var pendingField = Field(service, "_pendingRdpSettingChanges");
         pendingField.SetValue(service, Enum.ToObject(pendingField.FieldType, 2));
         Assert.False((bool)Invoke(service, "IsConnectionAttemptInProgress"));
@@ -106,7 +106,7 @@ public sealed class SessionLifecycleTests
     [Fact]
     public void MissingSettingsReconnectCallbackExpiresOnceAndPreservesPendingSettings()
     {
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var service = CreateServiceSkeleton();
         var pending = Field(service, "_pendingRdpSettingChanges");
         pending.SetValue(service, Enum.ToObject(pending.FieldType, 2));
         Set(service, "_rdpSettingsReconnectActive", true);
@@ -116,14 +116,14 @@ public sealed class SessionLifecycleTests
         Assert.False((bool)Get(service, "_rdpSettingsReconnectActive"));
         Assert.Equal(0, (int)Get(service, "_rdpSettingsReconnectRetriesRemaining"));
         Assert.Equal(1, (int)Get(service, "_settingsReconnectGeneration"));
-        Assert.Equal(2, Convert.ToInt32(Get(service, "_pendingRdpSettingChanges")));
+        Assert.Equal(2, Convert.ToInt32(Get(service, "_pendingRdpSettingChanges"), System.Globalization.CultureInfo.InvariantCulture));
         Assert.False((bool)Invoke(service, "ExpireSettingsReconnect"));
     }
 
     [Fact]
     public void RetryDelayAndFreshAttemptDoNotExpireUsingOldDeadline()
     {
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var service = CreateServiceSkeleton();
         Set(service, "_rdpSettingsReconnectActive", true);
         Set(service, "_rdpSettingsReconnectRetryInProgress", true);
         Set(service, "_attemptDeadlineTick", Environment.TickCount64 - 1);
@@ -131,6 +131,15 @@ public sealed class SessionLifecycleTests
         Set(service, "_rdpSettingsReconnectRetryInProgress", false);
         Invoke(service, "MarkAttemptStarted");
         Assert.False((bool)Invoke(service, "ExpireSettingsReconnect"));
+    }
+
+    private static ChildSessionService CreateServiceSkeleton()
+    {
+        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        Set(service, "_desktopHost", new DesktopSessionHost(
+            () => throw new InvalidOperationException("This lifecycle fixture must not create a view."),
+            new SessionSettings(), () => null));
+        return service;
     }
 
     private static FieldInfo Field(object target, string name) =>

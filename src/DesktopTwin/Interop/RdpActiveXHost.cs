@@ -11,6 +11,7 @@ using DesktopTwin.Localization;
 
 namespace DesktopTwin.Interop;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2201", Justification = "COM adapters surface HRESULT failures as COMException for optional capability probes.")]
 internal sealed class RdpActiveXHost : AxHost
 {
     // Windows 10+ 自带的非脚本化 RDP ActiveX 控件（MsRdpClient10）。
@@ -172,7 +173,7 @@ internal sealed class RdpActiveXHost : AxHost
         {
             var extendedSettings = (IMsRdpExtendedSettings)client;
             TrySetExtendedProperty(extendedSettings, "EnableZoom", true);
-            TrySetExtendedProperty(extendedSettings, "DesktopScaleFactor", DesktopScaleFactor);
+            TrySetExtendedProperty(extendedSettings, nameof(DesktopScaleFactor), DesktopScaleFactor);
             TrySetExtendedProperty(extendedSettings, "DeviceScaleFactor", (uint)100);
             var accepted = RdpLocalGraphicsOptions.Apply((name, enabled) =>
             {

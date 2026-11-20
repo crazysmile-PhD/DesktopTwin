@@ -3,10 +3,10 @@ using System.Drawing;
 using System.IO;
 using System.Windows;
 using DesktopTwin.Localization;
-using DesktopTwin.View;
+using DesktopTwin.Services;
 using Forms = System.Windows.Forms;
 
-namespace DesktopTwin.Services;
+namespace DesktopTwin.View;
 
 /// <summary>
 /// 托盘图标。
@@ -15,11 +15,12 @@ namespace DesktopTwin.Services;
 /// 用户只能靠再次启动程序来唤回。托盘图标给这条路径一个看得见的落点，
 /// 顺便把「显示 / 隐藏 / 退出」三个动作放到右键菜单里。
 /// </summary>
-internal sealed class TrayIconService : IDisposable
+internal sealed class TrayIconController : IDisposable
 {
     private const string IconResourceUri = "pack://application:,,,/Assets/DesktopTwin.ico";
 
     private readonly ChildSessionService _childSessionService;
+    private readonly Func<MainWindow?> _getWindow;
     private readonly Forms.NotifyIcon _notifyIcon;
     private readonly Forms.ContextMenuStrip _menu;
     private readonly Forms.ToolStripMenuItem _showItem;
@@ -30,9 +31,10 @@ internal sealed class TrayIconService : IDisposable
     /// 创建托盘图标并立即显示。
     /// </summary>
     /// <param name="childSessionService">用于显示/隐藏窗口。</param>
-    public TrayIconService(ChildSessionService childSessionService)
+    public TrayIconController(ChildSessionService childSessionService, Func<MainWindow?> getWindow)
     {
         _childSessionService = childSessionService;
+        _getWindow = getWindow;
 
         _showItem = new Forms.ToolStripMenuItem(Locale.Get("Tray.Show"), image: null, OnShowClicked);
         _hideItem = new Forms.ToolStripMenuItem(Locale.Get("Tray.Hide"), image: null, OnHideClicked);
@@ -115,7 +117,7 @@ internal sealed class TrayIconService : IDisposable
         try
         {
             _childSessionService.ShowWindow();
-            _childSessionService.Window?.EnterFullscreen();
+            _getWindow()?.EnterFullscreen();
         }
         catch (Exception exception) when (exception is ObjectDisposedException
                                               or InvalidOperationException)
@@ -129,7 +131,7 @@ internal sealed class TrayIconService : IDisposable
         // 托盘里的「退出」按用户要求直接退出，不再弹确认框——
         // 托盘是常驻入口，用户点它就是要走，反复确认反而碍事。
         // 注意：这仍然会注销分身会话，里面的程序会被关闭。
-        var window = _childSessionService.Window;
+        var window = _getWindow();
         if (window is null)
         {
             try { await ChildSessionProcessLauncher.StopAsync(); }
@@ -180,7 +182,7 @@ internal sealed class TrayIconService : IDisposable
         try
         {
             _childSessionService.ShowWindow();
-            var window = _childSessionService.Window;
+            var window = _getWindow();
             if (window is not null)
             {
                 window.Activate();

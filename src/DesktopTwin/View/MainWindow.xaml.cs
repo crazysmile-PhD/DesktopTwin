@@ -18,6 +18,7 @@ namespace DesktopTwin.View;
 /// <summary>
 /// 桌面分身主窗口：标题栏放控制入口，内容区承载 RDP 画面。
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "WPF owns the window lifetime; OnClosed disposes the timer, view model and RDP host.")]
 public partial class MainWindow : FluentWindow
 {
     private const double FullscreenBarAutoHideSeconds = 6;
@@ -211,7 +212,7 @@ public partial class MainWindow : FluentWindow
         using var timing = new PerformanceTrace("主窗口释放（事件订阅与 ActiveX）");
         if (DataContext is MainWindowViewModel viewModel)
         {
-            viewModel.Detach();
+            viewModel.Dispose();
         }
 
         if (_windowSource is not null)

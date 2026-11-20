@@ -1,0 +1,49 @@
+{
+  "VIEW001": {
+    "description": "Desktop layout preserves aspect ratio and a reachable caption; legacy startup settings migrate to readable automatic resolution.",
+    "tests": [
+      "DesktopTwin.Tests.DesktopViewportTests.StartupRestoresSavedPositionFitsTheWorkAreaAndConstrainsDragging",
+      "DesktopTwin.Tests.DesktopViewportTests.ResizeAndResolutionChangesPreserveWindowPlacement",
+      "DesktopTwin.Tests.DesktopViewportTests.NativeRdpControlReceivesTheFittedRectangleWithoutConnecting",
+      "DesktopTwin.Tests.SettingsServiceTests.升级时恢复可读的自动分辨率且不再自动进入旧小窗"
+    ]
+  },
+  "ARCH001": {
+    "description": "No service may depend on concrete views; session ports and their owner stay independent of UI and native controls.",
+    "tests": [
+      "DesktopTwin.Tests.ArchitectureTests.NoServiceCanDependOnConcreteViews",
+      "DesktopTwin.Tests.ArchitectureTests.SessionContractsRemainIndependentOfImplementations",
+      "DesktopTwin.Tests.ArchitectureTests.DesktopHostDoesNotDependOnUiOrNativeControl"
+    ]
+  },
+  "LIFE001": {
+    "description": "One lazy view is owned, partial initialization is cleaned up, and event subscriptions end before close.",
+    "tests": [
+      "DesktopTwin.Tests.DesktopSessionHostTests.ViewIsLazyAndCreatedOnceWithCurrentSettingsAndFreshCredentials",
+      "DesktopTwin.Tests.DesktopSessionHostTests.EventsForwardTheirEvidenceAndAreDetachedBeforeClose",
+      "DesktopTwin.Tests.DesktopSessionHostTests.DisposingUnusedHostDoesNotCreateAViewAndPreventsLaterCreation",
+      "DesktopTwin.Tests.DesktopSessionHostTests.ConfigurationFailureClosesPartialViewAndAllowsCleanRetry",
+      "DesktopTwin.Tests.DesktopSessionHostTests.FailedCleanupRetainsBothCauses"
+    ]
+  },
+  "CRED001": {
+    "description": "Credential policy is platform independent; account operations preserve encrypted reader snapshots and reject failed protection.",
+    "tests": [
+      "DesktopTwin.Tests.ArchitectureTests.CredentialPolicyDoesNotDependOnUiStorageOrNativePlatform",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.AccountOperationsAreCaseInsensitiveAndIsolated",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.EncryptionFailurePreservesExistingSecretAndDoesNotScheduleSave",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.PublishedTablesDoNotMutateEarlierReaderSnapshots",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.ReadsUseCurrentCiphertextAndNeverCachePlaintext",
+      "DesktopTwin.Tests.DpapiProtectorTests.SyntheticSecretRoundTripsThroughWindowsProtection",
+      "DesktopTwin.Tests.DpapiProtectorTests.AutoLoginPersistsOnlyProtectedValues"
+    ]
+  },
+  "TEST001": {
+    "description": "Owned integration processes are cleaned up safely even when targets exit during cleanup; run-level errors block release.",
+    "tests": [
+      "DesktopTwin.Tests.SessionLaunchIntegrationTests.FixtureCleanupAcceptsAlreadyExitedTarget",
+      "DesktopTwin.Tests.SessionLaunchIntegrationTests.CancellationClosesChannelAndStopsWorker",
+      "DesktopTwin.Tests.SessionLaunchIntegrationTests.RealSchedulerDeletesTaskBeforeTargetStarts"
+    ]
+  }
+}

@@ -35,15 +35,18 @@ internal sealed class AsyncSnapshotRefresh<T>(
             while (_pending && !_disposed)
             {
                 _pending = false;
+                T snapshot;
                 try
                 {
-                    var snapshot = await collect();
-                    if (!_disposed && !_pending) publish(snapshot);
+                    snapshot = await collect();
                 }
                 catch (Exception exception)
                 {
                     if (!_disposed && !_pending) failed(exception);
+                    continue;
                 }
+                // Rendering failures belong to the caller, not the collection error callback.
+                if (!_disposed && !_pending) publish(snapshot);
             }
         }
         finally

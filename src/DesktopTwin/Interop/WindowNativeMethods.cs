@@ -147,8 +147,8 @@ internal static class WindowNativeMethods
                 // （mstsc、OneDrive、VPN 客户端……），不过滤会把本程序的凭据填到别人框里。
                 if (processId is not null)
                 {
-                    GetWindowThreadProcessId(window, out var windowProcessId);
-                    if (windowProcessId != processId.Value)
+                    var threadId = GetWindowThreadProcessId(window, out var windowProcessId);
+                    if (threadId == 0 || windowProcessId != processId.Value)
                     {
                         return true;
                     }
@@ -258,9 +258,11 @@ internal static class WindowNativeMethods
     private static extern bool IsWindowVisible(IntPtr window);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1838", Justification = "Bounded Unicode buffer matches the existing Win32 marshalling contract.")]
     private static extern int GetClassName(IntPtr window, StringBuilder className, int maximumLength);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1838", Justification = "Bounded Unicode buffer matches the existing Win32 marshalling contract.")]
     private static extern int GetWindowText(IntPtr window, StringBuilder text, int maximumLength);
 
     [DllImport("user32.dll")]
