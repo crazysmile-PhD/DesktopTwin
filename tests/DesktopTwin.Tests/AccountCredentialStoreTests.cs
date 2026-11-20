@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using DesktopTwin.Credentials;
 using DesktopTwin.Models;
 
@@ -8,9 +9,9 @@ public sealed class AccountCredentialStoreTests
     [Fact]
     public void AccountOperationsAreCaseInsensitiveAndIsolated()
     {
-        var settings = new AutomationSettings { AutoLoginUserName = " Alice " };
-        settings.AutoLoginPasswords["alice"] = "cipher:old";
-        settings.AutoLoginPasswords["Bob"] = "cipher:bob";
+        var settings = new State { AutoLoginUserName = " Alice " };
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("alice", "cipher:old");
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("Bob", "cipher:bob");
         var changes = 0;
         var store = Create(settings, () => changes++);
         Assert.Equal("Alice", store.UserName);
@@ -37,12 +38,12 @@ public sealed class AccountCredentialStoreTests
     {
         foreach (var result in new string?[] { null, "", " " })
         {
-            var settings = new AutomationSettings { AutoLoginUserName = "Alice" };
-            settings.AutoLoginPasswords["Alice"] = "cipher:existing";
+            var settings = new State { AutoLoginUserName = "Alice" };
+            settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("Alice", "cipher:existing");
             var snapshot = settings.AutoLoginPasswords;
-            var store = new AccountCredentialStore(settings, () => "fallback", _ => result,
+            var store = new AccountCredentialStore(() => settings.Value, () => "fallback", _ => result,
                 _ => throw new InvalidOperationException("must not decrypt during save"),
-                () => Assert.Fail("failed protection must not schedule persistence"));
+                _ => Assert.Fail("failed protection must not schedule persistence"));
             Assert.False(store.SavePassword("new"));
             Assert.Same(snapshot, settings.AutoLoginPasswords);
             Assert.Equal("cipher:existing", snapshot["Alice"]);
@@ -52,11 +53,11 @@ public sealed class AccountCredentialStoreTests
     [Fact]
     public void PublishedTablesDoNotMutateEarlierReaderSnapshots()
     {
-        var settings = new AutomationSettings { AutoLoginUserName = "Alice" };
+        var settings = new State { AutoLoginUserName = "Alice" };
         settings.AutoLoginPasswords = new Dictionary<string, string>
         {
             ["Alice"] = "cipher:old", ["ALICE"] = "cipher:duplicate", ["Bob"] = "cipher:bob"
-        };
+        }.ToImmutableDictionary();
         var original = settings.AutoLoginPasswords;
         var store = Create(settings, () => { });
         var reader = original.GetEnumerator();
@@ -76,17 +77,17 @@ public sealed class AccountCredentialStoreTests
     [Fact]
     public void ReadsUseCurrentCiphertextAndNeverCachePlaintext()
     {
-        var settings = new AutomationSettings { AutoLoginUserName = "Alice" };
+        var settings = new State { AutoLoginUserName = "Alice" };
         var decrypts = 0;
-        var store = new AccountCredentialStore(settings, () => "fallback", value => "cipher:" + value,
-            value => { decrypts++; return value == "cipher:valid" ? "plain" : null; }, () => { });
+        var store = new AccountCredentialStore(() => settings.Value, () => "fallback", value => "cipher:" + value,
+            value => { decrypts++; return value == "cipher:valid" ? "plain" : null; }, change => settings.Value = change(settings.Value));
         Assert.Null(store.ReadPassword());
-        settings.AutoLoginPasswords["Alice"] = " ";
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("Alice", " ");
         Assert.Null(store.ReadPassword());
         Assert.Equal(0, decrypts);
-        settings.AutoLoginPasswords["Alice"] = "cipher:valid";
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("Alice", "cipher:valid");
         Assert.Equal("plain", store.ReadPassword());
-        settings.AutoLoginPasswords["Alice"] = "corrupted";
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("Alice", "corrupted");
         Assert.Null(store.ReadPassword());
         Assert.Equal(2, decrypts);
         Assert.DoesNotContain("plain", settings.AutoLoginPasswords.Values);
@@ -95,19 +96,30 @@ public sealed class AccountCredentialStoreTests
     [Fact]
     public void EmptyConfiguredUserUsesCurrentIdentityAndNamesAreSorted()
     {
-        var settings = new AutomationSettings { AutoLoginUserName = " " };
-        settings.AutoLoginPasswords["zoe"] = "cipher:z";
-        settings.AutoLoginPasswords["ALICE"] = "cipher:a";
-        settings.AutoLoginPasswords[" "] = "ignored";
+        var settings = new State { AutoLoginUserName = " " };
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("zoe", "cipher:z");
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem("ALICE", "cipher:a");
+        settings.AutoLoginPasswords = settings.AutoLoginPasswords.SetItem(" ", "ignored");
         var current = "FirstUser";
-        var store = new AccountCredentialStore(settings, () => current, _ => null, _ => null, () => { });
+        var store = new AccountCredentialStore(() => settings.Value, () => current, _ => null, _ => null, change => settings.Value = change(settings.Value));
         Assert.Equal("FirstUser", store.UserName);
         current = "SecondUser";
         Assert.Equal("seconduser", store.AccountKey);
         Assert.Equal(new[] { "ALICE", "zoe" }, store.StoredAccountNames);
     }
 
-    private static AccountCredentialStore Create(AutomationSettings settings, Action changed) =>
-        new(settings, () => "fallback", value => "cipher:" + value,
-            value => value["cipher:".Length..], changed);
+    private static AccountCredentialStore Create(State settings, Action changed) =>
+        new(() => settings.Value, () => "fallback", value => "cipher:" + value,
+            value => value["cipher:".Length..], change => { settings.Value = change(settings.Value); changed(); });
+
+    private sealed class State
+    {
+        internal AutomationSettings Value { get; set; } = new();
+        public string? AutoLoginUserName { init => Value = Value with { AutoLoginUserName = value }; }
+        internal ImmutableDictionary<string, string> AutoLoginPasswords
+        {
+            get => Value.AutoLoginPasswords;
+            set => Value = Value with { AutoLoginPasswords = value };
+        }
+    }
 }

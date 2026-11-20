@@ -334,14 +334,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnIsSmallWindowModeChanged(bool value)
     {
-        _settings.Current.Window.SmallWindowMode = value;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Window = s.Window with { SmallWindowMode = value } });
     }
 
     partial void OnAutoLaunchOnConnectChanged(bool value)
     {
-        _settings.Current.Launch.AutoLaunchOnConnect = value;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Launch = s.Launch with { AutoLaunchOnConnect = value } });
 
         // 打开自动启动时如果已经开着「管理员权限」，要补一次明确授权
         // （用户可能是先勾了提权、再勾自动启动）。
@@ -353,8 +351,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnRunAsAdministratorChanged(bool value)
     {
-        _settings.Current.Launch.RunAsAdministrator = value;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Launch = s.Launch with { RunAsAdministrator = value } });
 
         // 「自动启动 + 提权」= 每次连上分身都会以管理员权限跑这个程序。
         // 这是一条需要用户明确点头的路径，所以在这里要一次确认，
@@ -366,8 +363,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         else if (!value)
         {
             // 关掉提权就不需要这份授权了，顺手清掉，避免以后误用。
-            _settings.Current.Launch.ElevatedAutoLaunchConsent = null;
-            _settings.SaveSoon();
+            _settings.Update(s => s with { Launch = s.Launch with { ElevatedAutoLaunchConsent = null } });
         }
     }
 
@@ -424,10 +420,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        launch.ElevatedAutoLaunchConsent = ElevatedLaunchConsent.Issue(
+        var consent = ElevatedLaunchConsent.Issue(
             launch.TargetPath,
             launch.TargetArguments);
-        _settings.SaveSoon();
+        _settings.Update(s => s.Launch.TargetPath == launch.TargetPath && s.Launch.TargetArguments == launch.TargetArguments
+            ? s with { Launch = s.Launch with { ElevatedAutoLaunchConsent = consent } } : s);
         AppLog.Info($"已授权「自动以管理员权限启动」：{launch.TargetPath}");
 
         if (launchImmediately)
@@ -547,8 +544,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             return false;
         }
 
-        _settings.Current.ChildSessionNoticeAccepted = true;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { ChildSessionNoticeAccepted = true });
         return true;
     }
 
@@ -586,19 +582,15 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         var path = Path.GetFullPath(fileDialog.FileName);
-        var launch = _settings.Current.Launch;
-        launch.TargetPath = path;
-
-        // 最近使用列表去重后置顶，最多保留 8 条。
-        launch.RecentTargets.RemoveAll(item =>
-            string.Equals(item, path, StringComparison.OrdinalIgnoreCase));
-        launch.RecentTargets.Insert(0, path);
-        if (launch.RecentTargets.Count > 8)
+        _settings.Update(s =>
         {
-            launch.RecentTargets.RemoveRange(8, launch.RecentTargets.Count - 8);
-        }
-
-        _settings.SaveSoon();
+            // Build and publish the target and its bounded history as one snapshot.
+            var recent = s.Launch.RecentTargets.RemoveAll(item =>
+                string.Equals(item, path, StringComparison.OrdinalIgnoreCase)).Insert(0, path);
+            if (recent.Count > LaunchSettings.MaxRecentTargets)
+                recent = recent.RemoveRange(LaunchSettings.MaxRecentTargets, recent.Count - LaunchSettings.MaxRecentTargets);
+            return s with { Launch = s.Launch with { TargetPath = path, RecentTargets = recent, ElevatedAutoLaunchConsent = null } };
+        });
         TargetProgramText = BuildTargetProgramText(path);
         ShowNotification(
                 Locale.Get("Notify.TargetSelected.Title"),
@@ -607,10 +599,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         // 换了目标程序，之前那份「自动以管理员权限启动」的授权就作废了
         // （它是和路径绑定的），这里重新确认一次；不确认就退化成「跳过并提示」。
+        var launch = _settings.Current.Launch;
         if (launch.RunAsAdministrator && launch.AutoLaunchOnConnect)
         {
-            launch.ElevatedAutoLaunchConsent = null;
-            _settings.SaveSoon();
             _ = EnsureElevatedAutoLaunchConsentAsync(revertAutoLaunch: false);
         }
     }
@@ -841,8 +832,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var autoLogin = _childSessionService.AutoLogin;
         AutoLoginEnabled = true;
-        _settings.Current.Automation.AutoLoginEnabled = true;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = true } });
         ShowNotification(
                 Locale.Get("AutoLogin.Enabled.Title"),
                 Locale.Format("AutoLogin.Enabled.Message", autoLogin?.UserName),
@@ -866,8 +856,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (AutoLoginEnabled)
         {
             AutoLoginEnabled = false;
-            _settings.Current.Automation.AutoLoginEnabled = false;
-            _settings.SaveSoon();
+            _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = false } });
             ShowNotification(
                 Locale.Get("AutoLogin.Disabled.Title"),
                 Locale.Get("AutoLogin.Disabled.Message"),
@@ -902,8 +891,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _childSessionService.AutoLogin?.ClearPassword();
         HasAutoLoginPassword = false;
         AutoLoginEnabled = false;
-        _settings.Current.Automation.AutoLoginEnabled = false;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = false } });
         ShowNotification(
                 Locale.Get("AutoLogin.Cleared.Title"),
                 Locale.Get("AutoLogin.Cleared.Message"),

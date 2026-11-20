@@ -284,9 +284,7 @@ public sealed class ChildSessionService : IDisposable
     public void UseAutomaticDesktopSize()
     {
         ThrowIfDisposed();
-        _settings.Current.Session.AutomaticDesktopSize = true;
-        _settings.Current.Session.SmartSizing = true;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Session = s.Session with { AutomaticDesktopSize = true, SmartSizing = true } });
         DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
         RefreshState(Locale.Get("Svc.Status.AutomaticResolution"));
     }
@@ -302,8 +300,7 @@ public sealed class ChildSessionService : IDisposable
         get => _settings.Current.Window.NormalPosition;
         set
         {
-            _settings.Current.Window.NormalPosition = value;
-            _settings.SaveSoon();
+            _settings.Update(s => s with { Window = s.Window with { NormalPosition = value } });
         }
     }
 
@@ -315,8 +312,7 @@ public sealed class ChildSessionService : IDisposable
         get => _settings.Current.Window.SmallPosition;
         set
         {
-            _settings.Current.Window.SmallPosition = value;
-            _settings.SaveSoon();
+            _settings.Update(s => s with { Window = s.Window with { SmallPosition = value } });
         }
     }
 
@@ -363,7 +359,7 @@ public sealed class ChildSessionService : IDisposable
     {
         _settings = settings;
         _autoLogin = autoLogin;
-        _desktopHost = new DesktopSessionHost(() => createView(this), settings.Current.Session, ProvideAutoLoginCredential);
+        _desktopHost = new DesktopSessionHost(() => createView(this), () => settings.Current.Session, ProvideAutoLoginCredential);
         _desktopHost.VisibilityChanged += OnDesktopWindowVisibilityChanged;
         _desktopHost.ConnectionFailed += OnRdpConnectionFailed;
         _desktopHost.LoginCompleted += OnRdpLoginCompleted;
@@ -701,8 +697,7 @@ public sealed class ChildSessionService : IDisposable
         // 因此这条路径不能写设置，否则用户的选择会被悄悄改掉。
         if (persist)
         {
-            _settings.Current.Session.SmartSizing = enabled;
-            _settings.SaveSoon();
+            _settings.Update(s => s with { Session = s.Session with { SmartSizing = enabled } });
         }
 
         RefreshState(enabled ? Locale.Get("Svc.Status.Adaptive") : Locale.Get("Svc.Status.OneToOne"));
@@ -714,8 +709,7 @@ public sealed class ChildSessionService : IDisposable
     public void SetTopmost(bool enabled)
     {
         ThrowIfDisposed();
-        _settings.Current.Session.Topmost = enabled;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Session = s.Session with { Topmost = enabled } });
         RefreshState(enabled ? Locale.Get("Svc.Status.Topmost") : Locale.Get("Svc.Status.NotTopmost"));
     }
 
@@ -732,8 +726,7 @@ public sealed class ChildSessionService : IDisposable
         }
 
         SendSystemShortcutsToRemote = enabled;
-        _settings.Current.Session.SendSystemShortcutsToRemote = enabled;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Session = s.Session with { SendSystemShortcutsToRemote = enabled } });
         var window = EnsureDesktopWindow();
         window.RdpHost.SetSendSystemShortcutsToRemote(enabled);
         var target = enabled ? Locale.Get("Svc.Target.Child") : Locale.Get("Svc.Target.Local");
@@ -755,8 +748,7 @@ public sealed class ChildSessionService : IDisposable
             return false;
         }
 
-        _settings.Current.Session.AudioMuted = muted;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Session = s.Session with { AudioMuted = muted } });
         var window = EnsureDesktopWindow();
         window.RdpHost.SetAudioMuted(muted);
         return ReconnectForRdpSettingChange(
@@ -777,8 +769,7 @@ public sealed class ChildSessionService : IDisposable
             return false;
         }
 
-        _settings.Current.Session.RelativeMouseMode = enabled;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Session = s.Session with { RelativeMouseMode = enabled } });
         var window = EnsureDesktopWindow();
         window.RdpHost.SetRelativeMouseMode(enabled);
         return ReconnectForRdpSettingChange(
@@ -793,8 +784,7 @@ public sealed class ChildSessionService : IDisposable
     public void SetWatchModeEnabled(bool enabled)
     {
         ThrowIfDisposed();
-        _settings.Current.Session.WatchMode = enabled;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Session = s.Session with { WatchMode = enabled } });
         // 切回控制模式时 SetInputBlocked 会把焦点还给输入窗口：观看模式期间
         // 被系统移走的焦点不会自动回来，画面看着像还在观看模式。
         _desktopHost.Current?.RdpHost.SetInputBlocked(enabled);
@@ -821,10 +811,10 @@ public sealed class ChildSessionService : IDisposable
                     SessionSettings.MaxDesktopHeight));
         }
 
-        _settings.Current.Session.AutomaticDesktopSize = false;
-        _settings.Current.Session.DesktopWidth = width;
-        _settings.Current.Session.DesktopHeight = height;
-        _settings.SaveSoon();
+        _settings.Update(s => s with
+        {
+            Session = s.Session with { AutomaticDesktopSize = false, DesktopWidth = width, DesktopHeight = height }
+        });
 
         // 分辨率变了，全屏下「1:1 还是自适应」的判定前提也变了，通知界面重新算。
         DesktopSizeChanged?.Invoke(this, EventArgs.Empty);

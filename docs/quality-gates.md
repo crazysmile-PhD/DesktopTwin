@@ -11,7 +11,7 @@
 - Debug、Release 均编译与测试，原生冒烟项目参与编译；测试有挂起诊断超时，作业有总超时。
 - 架构测试限制 Models 对 UI、存储、服务和原生操作的依赖；诊断历史不能依赖窗口或原生操作。所有服务均禁止依赖具体视窗，无豁免。会话端口与 DesktopSessionHost 不能依赖 WPF 或原生控件。
 - Release 测试必须实际执行、全部通过、零跳过；空或缺少 TRX、运行级清理失败、缺少覆盖率、缺少受保护类型均失败。异步方法生成的状态机也接受覆盖率门槛。
-- `build/coverage-policy.json` 对核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。DesktopSessionHost 与 AccountCredentialStore 要求 95% 行、90% 分支覆盖率。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
+- `build/coverage-policy.json` 对核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。DesktopSessionHost、AccountCredentialStore 与 CredentialDialogWatch 要求 95% 行、90% 分支覆盖率。外部命令另以真实隔离进程验证输出、退出、超时和进程树清理，不宣称已覆盖所有操作系统错误分支。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
 - 保留 XAML 绑定、资源、常量唯一来源检查。图标改为真实枚举成员精确匹配，程序集不存在时失败。
 - Actions 固定提交 SHA，Dependabot 每周检查 NuGet 和 Actions 更新。两种单文件包都接受锁定还原与分析器检查。
 
@@ -32,7 +32,7 @@
 
 MainWindowViewModel、MainWindow、ChildSessionService、环境检查和 AutoLoginService 仍承担较多职责。具体视窗依赖已被端口替换，但会话服务仍直接调用 WTS，使用 Dispatcher/真实时间，连接重试仍分布于服务和 ActiveX 层。
 
-凭据存取策略已抽出为 AccountCredentialStore，并以新密文表替换旧表，避免修改在途读者正在枚举的字典。后续仍应抽出连接状态机与平台端口，并继续拆分身份查询和 UI Automation。每次拆分先覆盖状态转换与资源所有权。
+设置对象图已改为 sealed record、init-only 属性与不可变集合；SettingsService.Update 在短锁内发布完整快照，写盘使用独立锁，避免普通修改等待磁盘 I/O。AccountCredentialStore 通过快照读取与事务更新访问凭据。CredentialDialogWatch 持有监听 Task，并串行交接取消后的工作；已进入 UI Automation/COM 的调用仍须协作式收尾。后续仍应抽出连接状态机与平台端口，并继续拆分身份查询和 UI Automation。每次拆分先覆盖状态转换与资源所有权。
 
 ## 已修复项目的发布阻断规则
 
@@ -45,6 +45,9 @@ MainWindowViewModel、MainWindow、ChildSessionService、环境检查和 AutoLog
 | LIFE001 | 延迟创建且只持有一个视窗；配置失败关闭部分创建对象；关闭前解除订阅并保留清理错误 |
 | CRED001 | 密码策略不依赖平台/UI；加密失败保留旧记录、账户操作隔离、更新不修改读者快照、真实 DPAPI 往返验证 |
 | TEST001 | 整合测试只清理自己的程序，退出竞态得到处理；即使所有案例通过，运行级清理失败也阻断发布 |
+| SET001 | 设置对象图不可变；一次修改原子发布；并发冲刷只写完整快照，失败的修改不污染旧快照 |
+| PROC001 | 输出读取与退出共享命令截止时间；大量输出不死锁；超时终止仍运行的进程树；父进程退出后遗留的输出管道也不能无限等待 |
+| WATCH001 | 排队前捕获 token，工作完成后才释放 CTS；新监听等待旧监听收尾；取消和异常均被观察，重试预算不被轮询重置 |
 
 全应用初次行覆盖率约 26%，主要缺口为 WPF UI、外部 COM、真实 Child Session 和系统修复路径。CI 通过不能证明游戏输入、图形性能或注销行为正常。原生冒烟探针只参与编译，需在支持的 Windows 客户端另行运行。启动集成测试创建并清理自己带唯一标识的程序和临时任务，不连接或注销真实子会话。
 

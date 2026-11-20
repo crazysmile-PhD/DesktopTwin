@@ -7,7 +7,7 @@ namespace DesktopTwin.Services;
 /// <summary>Owns one lazily created session view, configuration and event subscriptions.</summary>
 internal sealed class DesktopSessionHost(
     Func<IDesktopSessionView> createView,
-    SessionSettings settings,
+    Func<SessionSettings> readSettings,
     Func<(string UserName, string Domain, string Password)?> credentialProvider) : IDisposable
 {
     private bool _disposed;
@@ -24,6 +24,7 @@ internal sealed class DesktopSessionHost(
         var view = createView();
         try
         {
+            var settings = readSettings();
             view.RdpHost.SetCredentialProvider(credentialProvider);
             view.RdpHost.SetSmartSizing(settings.SmartSizing);
             view.RdpHost.SetSendSystemShortcutsToRemote(settings.SendSystemShortcutsToRemote);

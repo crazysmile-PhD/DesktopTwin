@@ -1,12 +1,12 @@
 using System;
-using System.Collections.Generic;
+using System.Collections.Immutable;
 
 namespace DesktopTwin.Models;
 
 /// <summary>
 /// 应用全部可持久化设置。整体写入 <c>%AppData%\DesktopTwin\settings.json</c>。
 /// </summary>
-public sealed class AppSettings
+public sealed record AppSettings
 {
     /// <summary>
     /// 当前设置文件的结构版本。新增需要迁移的默认值变更时递增。
@@ -16,33 +16,33 @@ public sealed class AppSettings
     /// <summary>
     /// 设置文件写入时的结构版本。旧文件里没有这一项，反序列化后为 0。
     /// </summary>
-    public int SettingsVersion { get; set; }
+    public int SettingsVersion { get; init; }
 
     /// <summary>
     /// 桌面分身会话相关设置。
     /// </summary>
-    public SessionSettings Session { get; set; } = new();
+    public SessionSettings Session { get; init; } = new();
 
     /// <summary>
     /// 在分身中启动程序相关设置。
     /// </summary>
-    public LaunchSettings Launch { get; set; } = new();
+    public LaunchSettings Launch { get; init; } = new();
 
     /// <summary>
     /// 窗口外观相关设置。
     /// </summary>
-    public WindowSettings Window { get; set; } = new();
+    public WindowSettings Window { get; init; } = new();
 
     /// <summary>
     /// 分身自动登录设置。
     /// </summary>
-    public AutomationSettings Automation { get; set; } = new();
+    public AutomationSettings Automation { get; init; } = new();
 
     /// <summary>
     /// 用户是否已确认过「本程序会修改系统级 Child Sessions 开关」的首次运行提示。
     /// 未确认前不会真正启动分身，避免用户在不了解后果的情况下改动系统设置。
     /// </summary>
-    public bool ChildSessionNoticeAccepted { get; set; }
+    public bool ChildSessionNoticeAccepted { get; init; }
 
     /// <summary>
     /// 还有一次「深扫」义务没完成。
@@ -52,13 +52,13 @@ public sealed class AppSettings
     /// 否则程序恰好在深扫前退出，下次启动就退回浅扫，系统子树里的残留任务
     /// 从此再也看不见。
     /// </summary>
-    public bool PersistenceDeepScanPending { get; set; }
+    public bool PersistenceDeepScanPending { get; init; }
 }
 
 /// <summary>
 /// 桌面分身会话设置。
 /// </summary>
-public sealed class SessionSettings
+public sealed record SessionSettings
 {
     /// <summary>
     /// 分身桌面宽度的下限。再小的话 Windows 桌面和登录界面会显示不全。
@@ -90,66 +90,69 @@ public sealed class SessionSettings
     /// <summary>
     /// 分身桌面的逻辑分辨率宽度，默认 1920。
     /// </summary>
-    public int DesktopWidth { get; set; } = 1920;
+    public int DesktopWidth { get; init; } = 1920;
 
     /// <summary>
     /// 分身桌面的逻辑分辨率高度，默认 1080。
     /// </summary>
-    public int DesktopHeight { get; set; } = 1080;
+    public int DesktopHeight { get; init; } = 1080;
 
     /// <summary>
     /// 固定分辨率时是否等比缩放完整画面。关闭时按 1:1 像素显示。
     /// </summary>
-    public bool SmartSizing { get; set; } = true;
+    public bool SmartSizing { get; init; } = true;
 
     /// <summary>默认按窗口可用区域调整远端桌面分辨率，避免将高分辨率桌面缩成缩略图。</summary>
-    public bool AutomaticDesktopSize { get; set; } = true;
+    public bool AutomaticDesktopSize { get; init; } = true;
 
     /// <summary>
     /// Alt+Tab、Windows 键等系统组合键是否发送到分身。切换需重连 RDP。
     /// </summary>
-    public bool SendSystemShortcutsToRemote { get; set; } = true;
+    public bool SendSystemShortcutsToRemote { get; init; } = true;
 
     /// <summary>
     /// 是否关闭分身声音。切换需重连 RDP。
     /// </summary>
-    public bool AudioMuted { get; set; }
+    public bool AudioMuted { get; init; }
 
     /// <summary>
     /// 实验性原生相对鼠标，默认关闭。切换需重连；要求支持该能力的 RDP 控件和服务器。
     /// </summary>
-    public bool RelativeMouseMode { get; set; }
+    public bool RelativeMouseMode { get; init; }
 
     /// <summary>
     /// 观看模式：仅显示画面，本机键鼠不会进入分身。
     /// </summary>
-    public bool WatchMode { get; set; }
+    public bool WatchMode { get; init; }
 
     /// <summary>
     /// 窗口是否置顶。
     /// </summary>
-    public bool Topmost { get; set; }
+    public bool Topmost { get; init; }
 }
 
 /// <summary>
 /// 在分身会话中启动目标程序的设置。
 /// </summary>
-public sealed class LaunchSettings
+public sealed record LaunchSettings
 {
+    /// <summary>最近使用列表的持久化上限。</summary>
+    public const int MaxRecentTargets = 8;
+
     /// <summary>
     /// 连接成功后自动启动的程序路径。
     /// </summary>
-    public string? TargetPath { get; set; }
+    public string? TargetPath { get; init; }
 
     /// <summary>
     /// 启动目标程序时使用的命令行参数。
     /// </summary>
-    public string TargetArguments { get; set; } = string.Empty;
+    public string TargetArguments { get; init; } = string.Empty;
 
     /// <summary>
     /// 连接成功后是否自动启动目标程序。
     /// </summary>
-    public bool AutoLaunchOnConnect { get; set; } = true;
+    public bool AutoLaunchOnConnect { get; init; } = true;
 
     /// <summary>
     /// 是否以管理员权限启动目标程序。
@@ -157,7 +160,7 @@ public sealed class LaunchSettings
     /// 默认关闭：以普通权限运行能减少与反作弊、账号安全机制的冲突。
     /// 只有当目标程序自身要求提权（例如需要写入受保护目录）时才需要打开。
     /// </summary>
-    public bool RunAsAdministrator { get; set; }
+    public bool RunAsAdministrator { get; init; }
 
     /// <summary>
     /// 「连接成功后自动启动 + 以管理员权限启动」的一次性授权凭据（DPAPI 加密的 Base64）。
@@ -167,33 +170,33 @@ public sealed class LaunchSettings
     /// 于是改成「用户在界面上确认一次，程序记住这次授权」：授权与目标路径、参数绑定，
     /// 之后改了目标程序就要重新确认，不会变成一张可以随 settings.json 一起改的白条。
     /// </summary>
-    public string? ElevatedAutoLaunchConsent { get; set; }
+    public string? ElevatedAutoLaunchConsent { get; init; }
 
     /// <summary>
     /// 最近使用过的目标程序路径，最新的排在最前。
     /// </summary>
-    public List<string> RecentTargets { get; set; } = [];
+    public ImmutableList<string> RecentTargets { get; init; } = [];
 }
 
 /// <summary>
 /// 窗口外观设置。
 /// </summary>
-public sealed class WindowSettings
+public sealed record WindowSettings
 {
     /// <summary>
     /// 普通窗口模式下的窗口位置（物理像素）。
     /// </summary>
-    public WindowPosition? NormalPosition { get; set; }
+    public WindowPosition? NormalPosition { get; init; }
 
     /// <summary>
     /// 小窗模式下的窗口位置（物理像素）。
     /// </summary>
-    public WindowPosition? SmallPosition { get; set; }
+    public WindowPosition? SmallPosition { get; init; }
 
     /// <summary>
     /// 上次退出时是否处于小窗模式。
     /// </summary>
-    public bool SmallWindowMode { get; set; }
+    public bool SmallWindowMode { get; init; }
 
     /// <summary>
     /// 全屏模式下顶部的悬浮按钮栏是否固定显示。
@@ -201,24 +204,22 @@ public sealed class WindowSettings
     /// 默认 false：只在鼠标移到屏幕顶端、以及刚进入全屏时显示 10 秒。
     /// 用户点过图钉后记下来，之后每次进全屏都保持固定。
     /// </summary>
-    public bool FullscreenBarPinned { get; set; }
+    public bool FullscreenBarPinned { get; init; }
 }
 
 /// <summary>分身自动登录设置。</summary>
-public sealed class AutomationSettings
+public sealed record AutomationSettings
 {
     /// <summary>
     /// 是否启用分身自动登录。默认开启：没存密码时只尝试 RDP 记住的上一次凭据，
     /// 失败或没有就退回手动输入，不会静默改变任何东西。
     /// </summary>
-    public bool AutoLoginEnabled { get; set; } = true;
+    public bool AutoLoginEnabled { get; init; } = true;
 
     /// <summary>
     /// 自动登录使用的用户名。留空表示使用当前 Windows 账户。
     /// </summary>
-    public string? AutoLoginUserName { get; set; }
-
-    private volatile Dictionary<string, string> _autoLoginPasswords = new(StringComparer.OrdinalIgnoreCase);
+    public string? AutoLoginUserName { get; init; }
 
     /// <summary>
     /// 各账户的自动登录密码：键是用户名（不区分大小写），值是 DPAPI 加密后的 Base64。
@@ -231,13 +232,8 @@ public sealed class AutomationSettings
     /// DPAPI 是 CurrentUser 作用域：这份数据只有当前 Windows 账户能解开，
     /// 拷到别的机器或别的账户下都无效。
     /// </summary>
-    public Dictionary<string, string> AutoLoginPasswords
-    {
-        // Publish fully initialized replacement tables to background readers.
-        // Runtime writers must replace the table rather than mutate a published snapshot.
-        get => _autoLoginPasswords;
-        set => _autoLoginPasswords = value;
-    }
+    public ImmutableDictionary<string, string> AutoLoginPasswords { get; init; } =
+        ImmutableDictionary.Create<string, string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 仅用于把 0.2.3 测试版的「单账户密码」搬到 <see cref="AutoLoginPasswords"/>。
@@ -245,13 +241,13 @@ public sealed class AutomationSettings
     /// 读出来就立刻迁移并清空，之后不再写。测试版用户升级时不必重新输入一次密码。
     /// </summary>
     [System.Text.Json.Serialization.JsonPropertyName("AutoLoginPassword")]
-    public string? LegacyAutoLoginPassword { get; set; }
+    public string? LegacyAutoLoginPassword { get; init; }
 }
 
 /// <summary>
 /// 窗口左上角坐标。
 /// </summary>
-public sealed class WindowPosition
+public sealed record WindowPosition
 {
     /// <summary>
     /// 创建空位置。
@@ -272,12 +268,12 @@ public sealed class WindowPosition
     /// <summary>
     /// 水平坐标。
     /// </summary>
-    public int Left { get; set; }
+    public int Left { get; init; }
 
     /// <summary>
     /// 垂直坐标。
     /// </summary>
-    public int Top { get; set; }
+    public int Top { get; init; }
 
     /// <summary>
     /// 判断两个位置是否相同。

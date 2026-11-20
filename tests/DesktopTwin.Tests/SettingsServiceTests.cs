@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Text.Json;
+using System.Threading;
+using DesktopTwin.Models;
 using DesktopTwin.Services;
 
 namespace DesktopTwin.Tests;
@@ -42,7 +45,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         // 密码表默认是空的，且按键不区分大小写（多账户各存一份）
         Assert.Empty(settings.Automation.AutoLoginPasswords);
-        settings.Automation.AutoLoginPasswords["SomeUser"] = "x";
+        settings = settings with { Automation = settings.Automation with { AutoLoginPasswords = settings.Automation.AutoLoginPasswords.Add("SomeUser", "x") } };
         Assert.True(settings.Automation.AutoLoginPasswords.ContainsKey("someuser"));
 
         // 全屏顶栏默认不固定：只在鼠标到顶端时出现
@@ -81,9 +84,11 @@ public sealed class SettingsServiceTests : IDisposable
     {
         using (var service = new SettingsService(_directory))
         {
-            service.Current.Session.AutomaticDesktopSize = false;
-            service.Current.Session.SmartSizing = false;
-            service.Current.Window.SmallWindowMode = true;
+            service.Update(s => s with
+            {
+                Session = s.Session with { AutomaticDesktopSize = false, SmartSizing = false },
+                Window = s.Window with { SmallWindowMode = true }
+            });
             service.Flush();
         }
         using var reader = new SettingsService(_directory);
@@ -97,14 +102,14 @@ public sealed class SettingsServiceTests : IDisposable
     {
         using (var writer = new SettingsService(_directory))
         {
-            writer.Current.Session.DesktopWidth = 2560;
-            writer.Current.Session.DesktopHeight = 1440;
-            writer.Current.Session.AudioMuted = true;
-            writer.Current.Session.RelativeMouseMode = true;
-            writer.Current.Launch.TargetPath = @"C:\Games\game.exe";
-            writer.Current.Launch.RunAsAdministrator = true;
-            writer.Current.ChildSessionNoticeAccepted = true;
-            writer.Current.Window.FullscreenBarPinned = true;
+            writer.Update(s => s with { Session = s.Session with { DesktopWidth = 2560 } });
+            writer.Update(s => s with { Session = s.Session with { DesktopHeight = 1440 } });
+            writer.Update(s => s with { Session = s.Session with { AudioMuted = true } });
+            writer.Update(s => s with { Session = s.Session with { RelativeMouseMode = true } });
+            writer.Update(s => s with { Launch = s.Launch with { TargetPath = @"C:\Games\game.exe" } });
+            writer.Update(s => s with { Launch = s.Launch with { RunAsAdministrator = true } });
+            writer.Update(s => s with { ChildSessionNoticeAccepted = true });
+            writer.Update(s => s with { Window = s.Window with { FullscreenBarPinned = true } });
             writer.Flush();
         }
 
@@ -181,10 +186,8 @@ public sealed class SettingsServiceTests : IDisposable
     public async Task DeferredSavePersistsTheLatestChange()
     {
         using var service = new SettingsService(_directory);
-        service.Current.Session.DesktopWidth = 2560;
-        service.SaveSoon();
-        service.Current.Session.DesktopWidth = 3840;
-        service.SaveSoon();
+        service.Update(s => s with { Session = s.Session with { DesktopWidth = 2560 } });
+        service.Update(s => s with { Session = s.Session with { DesktopWidth = 3840 } });
         using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
         while (!File.Exists(service.SettingsPath)) await Task.Delay(25, timeout.Token);
         using var reader = new SettingsService(_directory);
@@ -192,13 +195,116 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public void SaveSoonAndRepeatedDisposeDoNothingAfterDisposal()
+    public void UpdateAfterDisposeDoesNotPublishOrScheduleSave()
     {
         var service = new SettingsService(_directory);
         service.Dispose();
-        service.SaveSoon();
+        var before = service.Current;
+        service.Update(_ => throw new InvalidOperationException("Late callback must not execute."));
+        Assert.Same(before, service.Current);
         service.Dispose();
         Assert.False(File.Exists(service.SettingsPath));
+    }
+
+    [Fact]
+    public async Task PublishedSettingsRemainImmutableAndUpdatesAreAtomic()
+    {
+        using var service = new SettingsService(_directory);
+        var before = service.Current;
+        using var building = new ManualResetEventSlim();
+        using var publish = new ManualResetEventSlim();
+        var update = Task.Run(() => service.Update(s =>
+        {
+            var next = s with { Session = s.Session with { DesktopWidth = 2560 } };
+            building.Set();
+            Assert.True(publish.Wait(TimeSpan.FromSeconds(10)));
+            return next with { Session = next.Session with { DesktopHeight = 1440 },
+                Launch = next.Launch with { TargetPath = "target", RecentTargets = ["target"] } };
+        }));
+        try
+        {
+            Assert.True(building.Wait(TimeSpan.FromSeconds(10)));
+            Assert.Same(before, service.Current);
+            Assert.Equal(1920, before.Session.DesktopWidth);
+            Assert.Empty(before.Launch.RecentTargets);
+        }
+        finally { publish.Set(); }
+        await update.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2560, service.Current.Session.DesktopWidth);
+        Assert.Equal(1440, service.Current.Session.DesktopHeight);
+        Assert.Empty(before.Launch.RecentTargets);
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)service.Current.Launch.RecentTargets).Add("mutation"));
+        service.Flush();
+        using var reloaded = new SettingsService(_directory);
+        Assert.Equal("target", Assert.Single(reloaded.Current.Launch.RecentTargets));
+        Assert.Equal(1440, reloaded.Current.Session.DesktopHeight);
+    }
+
+    [Fact]
+    public async Task ConcurrentFlushPersistsOneCompleteSnapshot()
+    {
+        using var service = new SettingsService(_directory);
+        service.Update(s => s with { Launch = s.Launch with { TargetPath = "0", RecentTargets = ["0"] } });
+        using var start = new ManualResetEventSlim();
+        var writer = Task.Run(() =>
+        {
+            Assert.True(start.Wait(TimeSpan.FromSeconds(10)));
+            for (var i = 0; i < 500; i++)
+            {
+                var target = (i % 4).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                service.Update(s => s with { Launch = s.Launch with
+                {
+                    TargetPath = target,
+                    RecentTargets = s.Launch.RecentTargets.RemoveAll(p => p == target).Insert(0, target)
+                } });
+            }
+        });
+        start.Set();
+        for (var i = 0; i < 100; i++)
+        {
+            service.Flush();
+            var saved = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(service.SettingsPath))!;
+            Assert.Equal(saved.Launch.TargetPath, saved.Launch.RecentTargets[0]);
+            Assert.InRange(saved.Launch.RecentTargets.Count, 1, 4);
+            Assert.All(saved.Launch.RecentTargets, item => Assert.False(string.IsNullOrWhiteSpace(item)));
+            Assert.Equal(saved.Launch.RecentTargets.Count, saved.Launch.RecentTargets.Distinct().Count());
+        }
+        await writer.WaitAsync(TimeSpan.FromSeconds(10));
+        service.Flush();
+        using var reader = new SettingsService(_directory);
+        Assert.Equal(service.Current.Launch.TargetPath, reader.Current.Launch.TargetPath);
+    }
+
+    [Fact]
+    public void FailedUpdateLeavesThePublishedSnapshotIntact()
+    {
+        using var service = new SettingsService(_directory);
+        var before = service.Current;
+        Assert.Throws<ArgumentNullException>(() => service.Update(null!));
+        Assert.Throws<InvalidOperationException>(() => service.Update(_ => null!));
+        Assert.Throws<IOException>(() => service.Update(s =>
+        {
+            _ = s with { ChildSessionNoticeAccepted = true };
+            throw new IOException("synthetic update failure");
+        }));
+        Assert.Same(before, service.Current);
+        service.Dispose();
+        Assert.False(File.Exists(service.SettingsPath));
+    }
+
+    [Fact]
+    public void PreviouslyDamagedHistoryIsRepairedAndPersisted()
+    {
+        File.WriteAllText(Path.Combine(_directory, "settings.json"), """
+            { "SettingsVersion": 1, "Launch": { "RecentTargets":
+              ["Target3", "Target2", "target3", null, " ", "4", "5", "6", "7", "8", "9", "10"] } }
+            """);
+        using (var service = new SettingsService(_directory))
+            Assert.Equal(new[] { "Target3", "Target2", "4", "5", "6", "7", "8", "9" }, service.Current.Launch.RecentTargets);
+        using var reader = new SettingsService(_directory);
+        Assert.Equal(LaunchSettings.MaxRecentTargets, reader.Current.Launch.RecentTargets.Count);
+        Assert.DoesNotContain("target3", reader.Current.Launch.RecentTargets);
+        Assert.All(reader.Current.Launch.RecentTargets, item => Assert.False(string.IsNullOrWhiteSpace(item)));
     }
 
     [Fact]
@@ -214,9 +320,7 @@ public sealed class SettingsServiceTests : IDisposable
     {
         using (var writer = new SettingsService(_directory))
         {
-            writer.Current.Launch.RecentTargets.Clear();
-            writer.Current.Launch.RecentTargets.Add(@"C:\a.exe");
-            writer.Current.Launch.RecentTargets.Add(@"C:\b.exe");
+            writer.Update(s => s with { Launch = s.Launch with { RecentTargets = [@"C:\a.exe", @"C:\b.exe"] } });
             writer.Flush();
         }
 
@@ -230,8 +334,7 @@ public sealed class SettingsServiceTests : IDisposable
     {
         using (var writer = new SettingsService(_directory))
         {
-            writer.Current.Automation.AutoLoginPasswords["batvb"] = "enc-1";
-            writer.Current.Automation.AutoLoginPasswords["OtherUser"] = "enc-2";
+            writer.Update(s => s with { Automation = s.Automation with { AutoLoginPasswords = s.Automation.AutoLoginPasswords.Add("batvb", "enc-1").Add("OtherUser", "enc-2") } });
             writer.Flush();
         }
 

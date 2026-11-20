@@ -9,7 +9,7 @@
 | `MainWindow` / `MainWindowViewModel` | 显示、命令、用户提示和服务组装 |
 | `WpfDesktopSessionView` / `RdpSessionClient` | 将具体窗口与原生控件适配到 UI 无关的会话端口 |
 | `DesktopSessionHost` | 延迟创建一个视窗，配置初值、转发事件并负责关闭前解除订阅 |
-| `AccountCredentialStore` | 无平台依赖的账户密码策略，使用注入的保护函数和保存通知；更新时发布新密文表 |
+| `AccountCredentialStore` | 无平台依赖的账户密码策略，使用注入的保护函数、快照读取和原子更新；发布不可变密文表 |
 | `TrayIconController` | 托盘菜单与具体窗口的呈现交互，属于 View 层 |
 | `ChildSessionService` | 子会话连接、注销、设置重连、状态发布 |
 | `RdpActiveXHost` | MsRdpClient10 COM 配置、回调和控件层排队重连 |
@@ -17,7 +17,10 @@
 | `ChildSessionProcessLauncher` / `SessionLaunchWorker` | 临时任务只引导独立启动代理进入指定会话；清理后授权启动并核对回执 |
 | `ChildSessionEnvironmentCheck` / `EnvironmentFixer` | 诊断采集与显式系统修复 |
 | `AsyncSnapshotRefresh<T>` | 合并界面的异步采集请求，丢弃过期/关闭后的结果 |
-| `AppSettingsNormalizer` | 无 IO 的设置修复与版本迁移；SettingsService 负责存储和延迟写入 |
+| `SettingsService` | 发布不可变设置快照；事务更新、合并保存与同步冲刷，磁盘锁不阻塞普通更新 |
+| `CredentialDialogWatch` | 持有监听工作及取消来源；串行交接新旧监听并观察异常 |
+| `BoundedProcessRunner` | 输出读取与退出共用截止时间；超时关闭输出并尽力终止仍运行的进程树 |
+| `AppSettingsNormalizer` | 无 IO 的设置修复与版本迁移；SettingsService 负责存储和延迟写入，原有 JSON 字段名保持兼容 |
 | `DiagnosticIssueHistory` | 独立维护诊断历史与已解决证据；DiagnosticsWindow 负责渲染 |
 
 App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 `IDesktopSessionView`、`IRdpSessionClient`，不创建或引用具体窗口和 ActiveX 控件。视窗配置失败会关闭部分创建的视窗，重试时重新创建；关闭前先解除事件订阅。

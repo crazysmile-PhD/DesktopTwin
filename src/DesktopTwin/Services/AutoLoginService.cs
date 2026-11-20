@@ -103,7 +103,7 @@ internal sealed class AutoLoginService : IDisposable
 
     private readonly SettingsService _settings;
     private readonly AccountCredentialStore _credentials;
-    private CancellationTokenSource? _watchCancellation;
+    private readonly CredentialDialogWatch _watch = new();
     private IntPtr _lastFilledDialog;
     private bool _disposed;
 
@@ -114,8 +114,9 @@ internal sealed class AutoLoginService : IDisposable
     public AutoLoginService(SettingsService settings)
     {
         _settings = settings;
-        _credentials = new AccountCredentialStore(settings.Current.Automation, () => Environment.UserName,
-            DpapiProtector.Protect, DpapiProtector.Unprotect, settings.SaveSoon);
+        _credentials = new AccountCredentialStore(() => settings.Current.Automation, () => Environment.UserName,
+            DpapiProtector.Protect, DpapiProtector.Unprotect,
+            change => settings.Update(s => s with { Automation = change(s.Automation) }));
     }
 
     /// <summary>
@@ -595,7 +596,7 @@ internal sealed class AutoLoginService : IDisposable
     /// </param>
     public void StartWatching(bool force = false)
     {
-        if (_disposed || !HasStoredPassword)
+        if (_disposed || _watch.IsStarted || !HasStoredPassword)
         {
             return;
         }
@@ -605,41 +606,13 @@ internal sealed class AutoLoginService : IDisposable
             return;
         }
 
-        // 已经在监听就直接返回：状态轮询每 500ms 调一次，重启会不断把重试次数清零。
-        if (_watchCancellation is not null)
-        {
-            return;
-        }
-
-        _lastFilledDialog = IntPtr.Zero;
-
-        var cancellation = new CancellationTokenSource();
-        _watchCancellation = cancellation;
-        _ = Task.Run(() => WatchAsync(cancellation.Token));
+        _watch.Start(WatchAsync);
     }
 
     /// <summary>
     /// 停止监听。连接结束或失败时调用。
     /// </summary>
-    public void StopWatching()
-    {
-        var cancellation = _watchCancellation;
-        _watchCancellation = null;
-        if (cancellation is null)
-        {
-            return;
-        }
-
-        try
-        {
-            cancellation.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-
-        cancellation.Dispose();
-    }
+    public void StopWatching() => _watch.Stop();
 
     /// <inheritdoc />
     public void Dispose()
@@ -650,19 +623,20 @@ internal sealed class AutoLoginService : IDisposable
         }
 
         _disposed = true;
-        StopWatching();
+        _watch.Dispose();
     }
 
     private async Task WatchAsync(CancellationToken token)
     {
-        var deadline = DateTime.UtcNow + WatchDuration;
+        _lastFilledDialog = IntPtr.Zero;
+        var elapsed = Stopwatch.StartNew();
         var attempts = 0;
 
         AppLog.Info("自动登录：开始监听 Windows 凭据弹窗。");
 
         while (!token.IsCancellationRequested
                && attempts < MaxFillAttempts
-               && DateTime.UtcNow < deadline)
+               && elapsed.Elapsed < WatchDuration)
         {
             try
             {
@@ -678,7 +652,7 @@ internal sealed class AutoLoginService : IDisposable
                 return;
             }
 
-            if (!TryFillCredentialDialog())
+            if (!TryFillCredentialDialog(token))
             {
                 continue;
             }
@@ -696,7 +670,7 @@ internal sealed class AutoLoginService : IDisposable
     /// <summary>
     /// 找到凭据弹窗就填一次。没有弹窗或填不进去返回 false。
     /// </summary>
-    private bool TryFillCredentialDialog()
+    private bool TryFillCredentialDialog(CancellationToken token)
     {
         var handle = FindCredentialDialog();
         if (handle == IntPtr.Zero || handle == _lastFilledDialog)
@@ -773,15 +747,15 @@ internal sealed class AutoLoginService : IDisposable
             // 这次没成就交给用户手动输入，不会反复试。
             if (userNameField is not null)
             {
-                TrySetValue(userNameField, dialogUserName, onlyWhenEmpty: true);
+                TrySetValue(userNameField, dialogUserName, onlyWhenEmpty: true, token);
             }
 
-            if (!TrySetValue(passwordField, password, onlyWhenEmpty: false))
+            if (!TrySetValue(passwordField, password, onlyWhenEmpty: false, token))
             {
                 return false;
             }
 
-            if (!TryInvokeConfirm(dialog))
+            if (!TryInvokeConfirm(dialog, token))
             {
                 AppLog.Warn("自动登录：已填入密码，但没找到可点击的确认按钮。");
                 return false;
@@ -840,7 +814,7 @@ internal sealed class AutoLoginService : IDisposable
         return IntPtr.Zero;
     }
 
-    private static bool TrySetValue(AutomationElement element, string value, bool onlyWhenEmpty)
+    private static bool TrySetValue(AutomationElement element, string value, bool onlyWhenEmpty, CancellationToken token)
     {
         try
         {
@@ -860,6 +834,7 @@ internal sealed class AutoLoginService : IDisposable
                 return true;
             }
 
+            if (token.IsCancellationRequested) return false;
             valuePattern.SetValue(value);
             return true;
         }
@@ -878,7 +853,7 @@ internal sealed class AutoLoginService : IDisposable
     /// 框里又有「取消」时，取第一个等于替用户点了取消，而调用方还会把它记成
     /// 「已经填过」，这一轮就再也不会重试。
     /// </summary>
-    private static bool TryInvokeConfirm(AutomationElement dialog)
+    private static bool TryInvokeConfirm(AutomationElement dialog, CancellationToken token)
     {
         var buttons = dialog.FindAll(
             TreeScope.Descendants,
@@ -958,6 +933,7 @@ internal sealed class AutoLoginService : IDisposable
                 return false;
             }
 
+            if (token.IsCancellationRequested) return false;
             invokePattern.Invoke();
             return true;
         }
