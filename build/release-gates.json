@@ -25,7 +25,8 @@
       "DesktopTwin.Tests.AccountCredentialStoreTests.EncryptionFailurePreservesExistingSecretAndDoesNotScheduleSave",
       "DesktopTwin.Tests.AccountCredentialStoreTests.PublishedTablesDoNotMutateEarlierReaderSnapshots",
       "DesktopTwin.Tests.AccountCredentialStoreTests.ReadsUseCurrentCiphertextAndNeverCachePlaintext",
-      "DesktopTwin.Tests.DpapiProtectorTests.SyntheticSecretRoundTripsThroughWindowsProtection"
+      "DesktopTwin.Tests.DpapiProtectorTests.SyntheticSecretRoundTripsThroughWindowsProtection",
+      "DesktopTwin.Tests.DpapiProtectorTests.AutoLoginPersistsOnlyProtectedValues"
     ]
   }
 }
