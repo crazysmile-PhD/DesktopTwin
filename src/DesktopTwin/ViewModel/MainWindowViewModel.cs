@@ -180,6 +180,7 @@ public partial class MainWindowViewModel : ObservableObject
         // 必须由分身会话里的这个代理接住，再回头通知主端执行切换。
         _sessionAgent = new SessionAgentService(Dispatcher.CurrentDispatcher);
         _sessionAgent.SwitchRequested += OnSessionAgentSwitchRequested;
+        _sessionAgent.HealthCheckRequested += OnAgentHealthCheckRequested;
 
         // 切换后串流端被自动恢复成功时告诉用户一声，免得用户以为得手动重连。
         _uuViewSwitchService.StreamerRecovered += OnStreamerRecovered;
@@ -488,7 +489,7 @@ public partial class MainWindowViewModel : ObservableObject
         {
             // 预检要读上千个计划任务 XML，放后台跑：这里在 UI 线程上，
             // 同步调用会直接把界面卡住。
-            await Task.Run(() => _childSessionService.RefreshEnvironmentCheckAsync());
+            await _childSessionService.RefreshEnvironmentCheckAsync();
 
             // 服务只是「没启动」时先替用户拉一次：状态栏已经写着「TermService：未启动」，
             // 用户点「启动」即视为同意。被禁用或启动失败的情况不在这里处理，
@@ -496,7 +497,7 @@ public partial class MainWindowViewModel : ObservableObject
             if (_childSessionService.HasBlockingEnvironmentIssue
                 && await Task.Run(() => _childSessionService.TryStartTermServiceIfStopped(out _)))
             {
-                await Task.Run(() => _childSessionService.RefreshEnvironmentCheckAsync());
+                await _childSessionService.RefreshEnvironmentCheckAsync();
                 _childSessionService.RefreshState();
             }
 
@@ -748,6 +749,7 @@ public partial class MainWindowViewModel : ObservableObject
         _globalHotkey?.Dispose();
         _globalHotkey = null;
         _sessionAgent.SwitchRequested -= OnSessionAgentSwitchRequested;
+        _sessionAgent.HealthCheckRequested -= OnAgentHealthCheckRequested;
         _sessionAgent.Dispose();
         _uuViewSwitchService.StreamerRecovered -= OnStreamerRecovered;
         _uuViewLockService.MonitoringFailed -= OnUuViewLockMonitoringFailed;
@@ -1302,7 +1304,7 @@ public partial class MainWindowViewModel : ObservableObject
             else
             {
                 // 自启项只在下次登录时生效，用户当前就开着分身，所以立刻拉一份。
-                _ = _sessionAgent.TryStartInChildSession();
+                _ = _sessionAgent.TryStartInChildSessionAsync(_childSessionService.SessionCancellationToken);
             }
 
             if (notifySuccess)
@@ -1702,6 +1704,8 @@ public partial class MainWindowViewModel : ObservableObject
     /// 7～12 秒，没有宽限就会把正在启动的代理误判成「不在线」再拉一个新的，
     /// 新代理又会杀掉旧的（自噬循环）。
     /// </summary>
+    private void OnAgentHealthCheckRequested(object? sender, EventArgs e) => EnsureSessionAgentRunning();
+
     private void EnsureSessionAgentRunning()
     {
         if (!UuViewSwitchEnabled || _childSessionService.ConnectedState != 1)
@@ -1733,7 +1737,7 @@ public partial class MainWindowViewModel : ObservableObject
         AppLog.Info(_sessionAgent.NeedsRestart
             ? "分身端脚本已更新，拉起新代理替换旧的。"
             : "分身端未在运行，重新拉起。");
-        _ = _sessionAgent.TryStartInChildSession();
+        _ = _sessionAgent.TryStartInChildSessionAsync(_childSessionService.SessionCancellationToken);
     }
 
     private void OnChildSessionConnectionFailed(
