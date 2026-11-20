@@ -161,6 +161,7 @@ public sealed class ChildSessionService : IDisposable
     private int _settingsReconnectGeneration;
     private int _rdpSettingsReconnectRetriesRemaining;
     private bool _rdpSettingsReconnectRetryInProgress;
+    private bool _rdpSettingsReconnectActive;
     private bool _statusTickInProgress;
     private bool _disposed;
     private string? _lastOperationMessage;
@@ -438,6 +439,7 @@ public sealed class ChildSessionService : IDisposable
         _settingsReconnectGeneration++;
         _connectionRetryInProgress = false;
         _rdpSettingsReconnectRetryInProgress = false;
+        _rdpSettingsReconnectActive = false;
     }
 
     /// <summary>
@@ -661,6 +663,13 @@ public sealed class ChildSessionService : IDisposable
     {
         ThrowIfDisposed();
         var window = _desktopWindow;
+        // 主动断开也撤销尚在预检/重试中的启动，避免它稍后把分身连回来。
+        lock (_environmentGate) _startGeneration++;
+        _connectionAttemptCompletionSource?.TrySetResult(false);
+        _initialConnectionRetriesRemaining = 0;
+        _connectionRetryInProgress = false;
+        _autoLaunchPending = false;
+        _rdpSettingsReconnectActive = false;
 
         // 先作废还在等的自动重连：它只认代际号，普通断开不会让它停下，
         // 等「会话释放」结束后会把分身又连回来——和切到主桌面的目的相反。
@@ -734,16 +743,18 @@ public sealed class ChildSessionService : IDisposable
         }
 
         // Disconnect 的回调丢失时必须先复位；放在取消和代际校验之后，统一由 UI 线程操作。
-        _desktopWindow?.RdpHost.ResetDisconnectState();
+        var connectionPending = IsConnectionAttemptInProgress()
+            || _desktopWindow?.RdpHost.ConnectedState == 2;
+        if (!connectionPending) _desktopWindow?.RdpHost.ResetDisconnectState();
         var window = EnsureDesktopWindow();
         if (showWindow && !_windowHiddenByUser)
         {
             ShowDesktopWindow(window);
         }
 
-        if (window.RdpHost.ConnectedState != 1
+        if (!connectionPending && (window.RdpHost.ConnectedState != 1
             || ChildSessionNativeMethods.TryGetChildSessionId() is not { } connectedSession
-            || !ChildSessionNativeMethods.IsSessionActive(connectedSession))
+            || !ChildSessionNativeMethods.IsSessionActive(connectedSession)))
         {
             if (ChildSessionNativeMethods.TryGetChildSessionId() is null)
             {
@@ -1016,6 +1027,7 @@ public sealed class ChildSessionService : IDisposable
             _initialConnectionRetriesRemaining = 0;
             _pendingRdpSettingChanges = RdpSettingChange.None;
             _rdpSettingsReconnectRetriesRemaining = 0;
+            _rdpSettingsReconnectActive = false;
             _connectionAttemptCompletionSource?.TrySetResult(false);
 
             TryDisconnectRdpHost();
@@ -1418,7 +1430,7 @@ public sealed class ChildSessionService : IDisposable
     {
         return ConnectedState == 2
                || _connectionAttemptCompletionSource is { Task.IsCompleted: false }
-               || _pendingRdpSettingChanges != RdpSettingChange.None;
+               || _rdpSettingsReconnectActive;
     }
 
     private void OnStatusTimerTick(object? sender, EventArgs e)
@@ -1583,6 +1595,7 @@ public sealed class ChildSessionService : IDisposable
             }
 
             _pendingRdpSettingChanges = RdpSettingChange.None;
+            _rdpSettingsReconnectActive = false;
         }
 
         if (_initialConnectionRetriesRemaining > 0
@@ -1616,6 +1629,7 @@ public sealed class ChildSessionService : IDisposable
         _desktopWindow?.RdpHost.SetInputBlocked(WatchModeEnabled);
 
         var completedSettingChanges = _pendingRdpSettingChanges;
+        _rdpSettingsReconnectActive = false;
         if (completedSettingChanges != RdpSettingChange.None)
         {
             _pendingRdpSettingChanges = RdpSettingChange.None;
@@ -2004,7 +2018,9 @@ public sealed class ChildSessionService : IDisposable
         }
 
         var previousSettingChanges = _pendingRdpSettingChanges;
+        var previouslyActive = _rdpSettingsReconnectActive;
         _pendingRdpSettingChanges |= settingChange;
+        _rdpSettingsReconnectActive = true;
         _rdpSettingsReconnectRetriesRemaining = RdpSettingsReconnectRetryCount;
         try
         {
@@ -2012,6 +2028,7 @@ public sealed class ChildSessionService : IDisposable
         }
         catch
         {
+            _rdpSettingsReconnectActive = previouslyActive;
             _pendingRdpSettingChanges = previousSettingChanges;
             if (_pendingRdpSettingChanges == RdpSettingChange.None)
             {

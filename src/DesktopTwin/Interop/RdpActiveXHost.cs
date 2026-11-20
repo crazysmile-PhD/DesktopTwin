@@ -157,6 +157,13 @@ internal sealed class RdpActiveXHost : AxHost
         {
             var extendedSettings = (IMsRdpExtendedSettings)client;
             TrySetExtendedProperty(extendedSettings, "EnableZoom", true);
+            var accepted = RdpLocalGraphicsOptions.Apply((name, enabled) =>
+            {
+                object value = enabled;
+                extendedSettings.set_Property(name, ref value);
+            });
+            AppLog.Info($"本机画面加速：共享帧缓冲属性接受={accepted.FrameBuffer}，"
+                + $"硬件解码属性接受={accepted.HardwareDecoding}。属性接受不代表运行时已经启用。");
             extendedSettings.set_Property("ConnectToChildSession", ref connectToChildSession);
         });
 
