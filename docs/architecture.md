@@ -1,118 +1,64 @@
-# 架构说明
+# 架构与操作边界
 
-## 一句话
+本文对应当前源码行为。Windows 或第三方程序的行为以接口定义和运行证据确认，不从注释推导性能保证。
 
-DesktopTwin 是「Windows RDP 子会话」的一层薄封装：**系统提供能力，本程序负责编排与呈现**。
+## 组件
 
-## 分层
+| 组件 | 职责 |
+| --- | --- |
+| `MainWindow` / `MainWindowViewModel` | 显示、命令、用户提示和服务组装 |
+| `ChildSessionService` | 子会话连接、注销、设置重连、状态发布 |
+| `RdpActiveXHost` | MsRdpClient10 COM 配置、回调和控件层排队重连 |
+| `UuViewSwitchService` | 串行执行 UU 切换、目标纠正及手动服务修复 |
+| `UuViewLockService` | 事件合并、手动优先、忙碌后补查及有界纠正 |
+| `SessionAgentService` / `SessionAgentProgram` | 安装独立代理、分身内热键、文件通知和健康检查 |
+| `ChildSessionProcessLauncher` | 用临时计划任务把目标程序送入指定会话 |
+| `ChildSessionEnvironmentCheck` / `EnvironmentFixer` | 诊断采集与显式系统修复 |
+| `AsyncSnapshotRefresh<T>` | 合并界面的异步采集请求，丢弃过期/关闭后的结果 |
 
-```
-View (WPF)              MainWindow / Dialogs / Behaviors
-   │  绑定 + 命令
-ViewModel               MainWindowViewModel（状态映射、命令、通知）
-   │  调用
-Services                ChildSessionService      会话生命周期与状态机
-                        ChildSessionProcessLauncher  跨会话启动进程
-                        ChildSessionEnvironmentCheck 只读环境预检
-                        SettingsService / AppLog     持久化与日志
-   │  调用
-Interop                 ChildSessionNativeMethods  wtsapi32 / user32
-                        RdpActiveXHost            AxHost + COM 事件
-                        WindowNativeMethods       GetWindowRect / SetWindowPos
-```
+会话服务直接持有窗口；这不是严格单向依赖架构。它同时保留服务层和控件层重试，仍有继续收敛的空间。
 
-依赖方向自上而下，没有反向依赖。唯一的例外是 `ChildSessionService` 直接持有 `MainWindow` 引用：
-这是一个「一窗口 + 一会话」的单窗口应用，为二者引入接口只会增加阅读成本。若将来需要多窗口，
-把 `MainWindow` 换成 `ISessionView` 接口即可，改动集中在 `EnsureDesktopWindow` 一处。
+## 连接
 
-## 关键流程
+`StartAsync` 切回 UI Dispatcher，同一启动代际内共用未完成的启动任务。请求先校验代际，再决定是否共用。已有且实际活动的连接直接返回；已有会话的重连复用诊断结果，新建会话前的近期诊断快照可复用 30 秒。
 
-### 1. 启动与连接
+连接配置的目标固定为 `127.0.0.1`，并设置 `ConnectToChildSession`。本机图形优化由 `RdpLocalGraphicsOptions` 在连接前分别尝试；失败不会阻断必要设置。控件返回成功不等于图形路径已协商成功。
 
-```
-StartAsync
-  ├─ RefreshEnvironmentCheck()        只读预检，结论缓存给界面与失败诊断
-  ├─ EnsureChildSessionsEnabled()     WTSIsChildSessionsEnabled → WTSEnableChildSessions(true)
-  └─ ConnectCore()
-       ├─ TryGetChildSessionId()      已有会话就复用，不重复创建
-       ├─ 创建并显示窗口
-       └─ RdpActiveXHost.ConnectToChildSession(1920×1080)
-            ├─ Server = "localhost"   ← 只连本机，不接受外部地址
-            ├─ SecuredSettings2.KeyboardHookMode / AudioRedirectionMode
-            ├─ AdvancedSettings7.RDPPort / EnableCredSspSupport / EnableWindowsKey / SmartSizing
-            ├─ IMsRdpExtendedSettings["ConnectToChildSession"] = true
-            └─ Connect()
-```
+启动任务通过 `TaskCompletionSource` 等待登录完成回调，单次尝试预算 60 秒。首次连接错误最多自动重试一次，延迟 4 秒。超时本身不触发这一轮重试。设置重连保留最多三次服务层重试，延迟 2/4/8 秒；控件还会先等 1 秒及最多 10 秒会话释放。这些预算不是“整次操作只需几秒”的保证。
 
-连接是**异步完成**的：`StartAsync` 用 `TaskCompletionSource` 等待 `OnLoginComplete` 事件，最多等 60 秒。
-首次创建会话时，Windows 要初始化一整个桌面，慢是正常的，因此失败后会按 1s / 2s / 4s 重试 3 次。
+设置重连也为每次实际尝试记录 60 秒截止时间。UI 状态采样发现回调缺失且预算到期时，会作废控件排队重连并报告超时；退避等待期间不使用上一轮截止时间，下一次尝试重新计时。待应用设置保留给下次显式连接。
 
-### 2. 在分身里启动程序
+确保连接时，若已有启动或设置重连在途，就观察其结果，不再先清掉它的控件重连状态。成功同时参考 ActiveX 连接状态和 WTS 会话活动状态。
 
-进程只能在自己所属的会话里创建窗口，所以跨会话启动必须借道任务计划程序：
+## 取消与注销
 
-```
-LaunchProgramCoreAsync
-  ├─ 校验会话号（可能已被重建）
-  ├─ SettingsService.Flush()                 目标程序可能读同一份配置
-  ├─ 注册临时任务（InteractiveToken + RunLevel 最高/普通）
-  ├─ RunEx(null, TASK_RUN_USE_SESSION_ID, 会话号, null)
-  └─ 立即 DeleteTask                         失败也不影响已启动的进程
-```
+`StartGeneration` 使旧启动、首次重试及设置重试无法写回新操作。主动断开也推进启动代际，完成旧连接等待并清除自动启动意图。注销/释放还取消捕获的会话生命周期 token。
 
-`RunLevel` 由设置决定：默认「普通权限」，这样能减少与反作弊/账号安全机制的冲突；
-需要时可在控制中心勾选「以管理员权限启动目标程序」。
+注销先校验会话号、撤销旧意图，不等待程序启动占用的 COM 信号量。重复请求共用同一次注销。WTS 注销使用 `wait: false`，随后异步观察最多 15 秒；超时只表示程序未确认完成，不意味着 Windows 已停止清理。接口语义见 [WTSLogoffSession](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtslogoffsession)。
 
-### 3. 注销
+取消是协作式的。已经进入系统或外部 COM 的调用不一定能被 token 中止；代码不会把“调用方不再等待”当成“底层操作已经结束”。退出时仍尽力请求注销子会话。
 
-```
-LogoffAndHideAsync
-  ├─ 校验 expectedSessionId（防止误注销重建后的新会话）
-  ├─ 断开 RDP
-  ├─ WTSLogoffSession（TerminateChildSession）
-  └─ 隐藏窗口
-```
+## UU 操作
 
-应用退出时同样会尝试注销（`wait: false`），失败只记日志。
-会话残留并不会阻止关机——Windows 关机时会结束所有会话——但残留会话会继续占资源，
-下次启动也可能重连到它，所以这一步仍然要尽力做。
+所有切换、纠正及手动修复共用一个信号量。手动操作异步等当前所有者退出，自动纠正遇忙返回 Deferred，并在手动操作结束后补查。手动命令执行期间暂停并取消自动纠正。
 
-## 状态与线程
+切主机：正常断开 RDP，必要时下发同一会话的 WTS 断开，统一观察最多 8 秒；结束串流端后观察目标最多 15 秒。成功后保持分身断开。
 
-- `ChildSessionService` 的所有状态刷新都在 UI 线程（`DispatcherTimer` 每 500ms 一次），
-  因此界面读取状态时不需要额外同步。
-- RDP ActiveX 的事件回调（`OnLoginComplete` / `OnDisconnected` / `OnLogonError`）来自 COM，
-  已在 `RdpActiveXHost` 内部转换到宿主控件线程再抛事件。
-- 启动进程的 COM 操作放在 `Task.Run` 里，用 `SemaphoreSlim` 串行化，避免并发注册同名任务。
+切分身：仅走一条确保连接路径；自动纠正只允许重连已有会话。注销 token 贯穿排队、连接与目标确认，后续不再另起一次无约束启动兜底。
 
-## RDP 设置切换为什么要重连
+每次操作设置 90 秒协作取消预算。手动重启 UU 服务在下发停止后，会用独立的有界预算尽力启动回来：停止阶段最多 20 秒、启动收尾最多 30 秒。它不派生后台恢复循环。外部系统调用自身是否及时返回，仍是运行环境边界。
 
-`KeyboardHookMode`（系统组合键发到哪一侧）和 `AudioRedirectionMode`（是否重定向音频）
-只能在**连接建立时**设置。因此切换这两个开关时，程序会主动断开并重连一次，
-并把「待生效的改动」记在 `_pendingRdpSettingChanges` 里，重连成功后回调通知界面。
+视角锁定订阅 WTS 会话通知及 WMI 进程启动事件。事件在 UI 上合并；连续目标不稳定最多纠正三次，中间退避 5/10 秒，然后关闭并通知。收到自己制造的中间事件也不能无限重试。
 
-## 输入屏蔽（观看模式）
+## 后台工作与状态
 
-RDP ActiveX 内部有一个标题为 `Input Capture Window` 的子窗口，所有键鼠输入都经过它。
-`ChildSessionNativeMethods.SetRdpInputWindowEnabled` 通过 `EnumChildWindows` 找到它并 `EnableWindow(false)`，
-即可实现「只显示画面、不接收输入」，画面渲染不受影响。
+- 状态采样仍为 UI 上每 500ms 一次；只在发布快照变化时触发 `StateChanged`。
+- 诊断在打开、激活、手动重检和后台完整性校验完成时采集；采集在后台，界面只渲染快照。没有每两秒完整重扫。
+- 计划任务扫描保留 30 秒缓存；文件完整性校验在后台串行运行。读取失败和未验证结果不能作为正常证据。
+- 目标程序及代理的任务计划程序 COM 调用放到后台。启动排队受会话 token 取消，下发前复查会话身份。
 
-这个窗口每次连接都会重建，因此观看模式必须在每次 `OnLoginComplete` 后重新施加（见 `ChildSessionService`）。
+代理源码位于 `src/SessionAgent/SessionAgentProgram.cs`，构建时用 Windows .NET Framework 编译器生成独立 `DesktopTwin.Agent.exe`，再嵌入主程序。不是主程序的 `--session-agent` 模式。
 
-## 想加「游戏鼠标模式」需要动哪里
+热键立即写 `uu-switch-request.json`；主端用文件事件投递到 UI，保留 1.5 秒轮询作健康检查和通知丢失兜底。请求按修改时间去重与判定时效。心跳、进程探测各有缓存，代理启动请求会合并。
 
-这是 ROADMAP 里的第一项，也是唯一需要**双进程**的功能：
-
-1. 本进程在分身窗口获得焦点时捕获鼠标相对位移（Raw Input）；
-2. 通过命名管道把位移发给**分身里的一个代理进程**；
-3. 代理用 `SendInput` 的相对位移标志注入。
-
-现有代码已经为此留好接口：`ChildSessionProcessLauncher.LaunchAsync` 可以带参数启动任意 exe，
-把 `Environment.ProcessPath` 加上 `--session-agent <pipeName>` 传进去即可，不需要改启动路径。
-新增部分应放在 `Core/MouseForwarding/`，不要污染 `Interop`。
-
-## 为什么不用 Windows 服务 / 驱动
-
-- 驱动需要签名与内核权限，成本和风险都不成比例；
-- 服务无法直接呈现 UI，还要额外处理会话隔离；
-- 本程序的目标就是「薄封装」，任何下沉到服务层的设计都会让安装与卸载变复杂。
+临时计划任务在运行请求下发后延迟 45 秒清理；下次程序启动也会清扫残留。日志“已启动”表示任务已下发，不构成目标程序已显示窗口的保证。

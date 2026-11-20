@@ -10,7 +10,7 @@ namespace DesktopTwin.Services;
 public static class AppLinks
 {
     /// <summary>GitHub 仓库，格式 owner/repo。</summary>
-    public const string Repository = "batvbs/DesktopTwin";
+    public const string Repository = "crazysmile-PhD/DesktopTwin";
 
     /// <summary>Issues 列表。</summary>
     public const string Issues = "https://github.com/" + Repository + "/issues";

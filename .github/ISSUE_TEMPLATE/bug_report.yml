@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        这个功能完全建立在 Windows 的 RDP / 子会话能力之上，**「在我这台机器上不行」不等于「程序有 bug」**。
-        提交前请先过一遍 [排查手册](https://github.com/batvbs/DesktopTwin/blob/main/docs/troubleshooting.md)。
+        请记录操作步骤、发生时间与程序版本/提交。程序状态、Windows 环境和第三方行为都可能造成问题。
+        提交前请先过一遍 [排查手册](https://github.com/crazysmile-PhD/DesktopTwin/blob/main/docs/troubleshooting.md)。
 
   - type: textarea
     id: symptom
@@ -52,18 +52,18 @@ body:
   - type: checkboxes
     id: tried
     attributes:
-      label: 已经试过
+      label: 可补充的排查信息（不要求先修改系统）
       options:
         - label: 重启过程序
         - label: 重启过系统
         - label: 确认没有安装 RDP Wrapper
-        - label: 确认账户有密码，且已关闭「仅允许 Windows Hello 登录」
+        - label: 已记录凭据提示与账户类型（如涉及登录失败）
         - label: 确认系统不是精简版 / 优化版
 
   - type: input
     id: version
     attributes:
       label: DesktopTwin 版本
-      placeholder: 0.1.0
+      placeholder: 版本号或源码提交 SHA
     validations:
       required: true

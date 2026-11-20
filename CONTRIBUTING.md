@@ -1,60 +1,41 @@
 # 参与开发
 
-## 环境
+## 构建与检查
 
-- Windows 10 及以上（开发与调试都需要）
-- .NET SDK 10.0+
-- Visual Studio 2022（含 .NET 桌面开发工作负载）或 Rider
+在 Windows 上安装 .NET SDK 10 或更新的兼容 SDK。项目使用 WPF、WinForms 和系统 RDP ActiveX；构建目标还会调用 Windows .NET Framework 的编译器生成独立代理。实际运行应用要求管理员权限，纯单元测试不因此获得操作真实会话的授权。
 
 ```powershell
-dotnet build -c Release
-```
-
-编译通过即可提交。**注意：程序清单要求管理员权限，调试时需要以管理员身份启动 IDE 或生成的 exe。**
-
-### 提交前自检
-
-CI 会跑这三步，本地先过一遍可以少一轮往返：
-
-```powershell
-dotnet build DesktopTwin.sln -c Release -warnaserror   # 警告即错误
+dotnet build DesktopTwin.sln -c Release -warnaserror
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-xaml.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-invariants.ps1
 dotnet test DesktopTwin.sln -c Release --no-build
 ```
 
-`verify-xaml.ps1` 校验 XAML 里的绑定路径、资源键、`SymbolRegular` 图标名是否真实存在。
-这类错误编译器不报，只在运行时抛异常或静默失效，所以单独做了一道静态检查。
-改了 ViewModel 属性名或图标名之后务必重跑。
+四步分别检查编译、XAML 绑定/资源、常量单一来源和测试。工作流定义在 `.github/workflows/build.yml`；fork 的 Actions 可能未启用，没有运行记录不能写成 CI 通过。
 
-`verify-invariants.ps1` 校验安全常量（任务计划程序的 CLSID、HKCU 的 COM 注册根路径）
-在整个文件里只出现一次。它们被「查覆盖」「报错给用户」「比对 HKLM」三处共用，
-复制一份到别处不会编译失败、也不会让测试变红，但改漏一处就会出现
-「检查的是 A、报给用户的是 B」。新增这类共用常量时，请一并把它加进脚本的检查列表。
+## 代码与文档
 
-## 代码约定
+- C# 使用 UTF-8 无 BOM、可空引用类型；优先显式判空，不用 `!` 掩盖生产代码的问题。
+- 私有字段 `_camelCase`，公共成员 `PascalCase`。新增类型和公共成员写 XML 注释。
+- 关键注释解释操作所有权、取消与完成条件；不要把某次机器上的经验写成系统保证。
+- XAML 只读状态显式使用 `Mode=OneWay`；翻译文字经 `Locale` / `loc:Loc`。
+- 文件扫描及外部服务 COM 移到后台；RDP 控件操作仍须在宿主 UI 线程。超时返回不代表底层操作已停止。
+- 新增开关前说明它解决的已证实需求，优先删除重复流程和自动回退；不要让用户替实现管理猜测中的兼容风险。
 
-- C# 文件使用 **UTF-8 无 BOM**（`.editorconfig` 已声明，Windows 上注意不要用 PowerShell 的默认编码写文件）
-- 私有字段 `_camelCase`，公共成员 `PascalCase`
-- 可空引用类型已开启，不要用 `!` 抑制警告，优先改成显式判空
-- 新增类型、公共成员必须有 XML 注释；关键流程要写清「为什么这么做」，而不是复述代码
-- 一个文件原则上只放一个类（枚举、单一用途的小 record 可以合并）
-- XAML 中绑定只读属性时必须显式写 `Mode=OneWay`（`Run.Text` 等默认双向绑定的属性会直接抛异常）
+修改行为时同步更新 README、架构和排查说明。文档中的版本、耗时与性能数字必须来自当前代码或可复现测量，明确两者的区别。历史 CHANGELOG 和发行说明保留当时上下文。
 
-## 提交
+## 验证范围
 
-- 一个提交只做一件事，提交信息写清「改了什么、为什么」
-- 涉及 `Interop/` 或 `ChildSessionProcessLauncher` 的改动，请在 PR 描述里说明验证方式
-  （这类代码在多数机器上无法自动化验证，需要人工说明依据）
+连接、注销、跨会话启动、UU 杀进程/重启服务或图形配置的 PR 应分别列出自动测试和实际 Windows 验证，不能用属性替身测试证明真实渲染正常。
 
-## 报告问题
+人工验证应覆盖：启动/设置重连期间注销，热键连续触发，手动操作与锁定碰撞，UU 进程未出现，窗口隐藏/退出，以及普通权限目标程序启动。注销会结束分身程序；执行前确认测试会话里没有需要保留的工作。
 
-请附上 **控制中心 → 诊断 → 复制环境信息** 的内容，以及 `%AppData%\DesktopTwin\logs\` 里对应的日志。
+性能验证使用 [固定比较条件](docs/performance.md)，同时记录源码提交、真实进程和测量范围。没有测量时不宣称降低了多少 CPU、内存或延迟。
 
-由于本功能完全建立在 Windows 的 RDP 能力之上，**「在你这台机器上不行」不等于「程序有 bug」**。
-提交前请先过一遍 [docs/troubleshooting.md](docs/troubleshooting.md)，并在 Issue 里说明已经试过哪些步骤。
+## 提交与反馈
 
-## 许可证
+一个 PR 说明一个可审查的问题、最终行为和验证结果。涉及 `Interop` 或任务计划程序时给出接口依据及尚未验证的边界。
 
-本项目为 GPL-3.0。提交代码即表示同意以同一许可证发布。
-如果你引入了第三方代码或资源，请同步更新 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+反馈入口为 [crazysmile-PhD/DesktopTwin](https://github.com/crazysmile-PhD/DesktopTwin/issues)。附上复现步骤、时间、Windows 构建号、程序提交/版本及对应日志；不能先假定失败都来自用户系统。
+
+项目采用 GPL-3.0。引入第三方代码时核对许可证并更新 `THIRD-PARTY-NOTICES.md`。

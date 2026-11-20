@@ -510,8 +510,7 @@ public static partial class ChildSessionEnvironmentCheck
     /// <summary>
     /// 检查 Windows 版本。
     ///
-    /// 微软官方文档说明家庭版不支持远程桌面主机，但实测大部分家庭版仍可建立 Child Session，
-    /// 因此这里只作为**提示**而非阻塞项，避免把本来能用的用户挡在门外。
+    /// 此处仅提示版本信息；本项目没有覆盖全部 SKU/构建/策略的兼容矩阵。
     /// </summary>
     private static void CollectEditionIssue(List<Issue> issues)
     {
@@ -544,7 +543,7 @@ public static partial class ChildSessionEnvironmentCheck
     }
 
     /// <summary>
-    /// 检查 Child Session API 是否存在。Windows 10 1803 之前没有这个导出。
+    /// 实际调用 Child Session 状态接口，区分入口缺失与其他运行错误。
     /// </summary>
     private static void CollectChildSessionApiIssue(List<Issue> issues)
     {

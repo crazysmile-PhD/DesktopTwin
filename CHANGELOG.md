@@ -2,6 +2,18 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 未发布
+
+- [PR #1](https://github.com/crazysmile-PhD/DesktopTwin/pull/1)：注销取消旧连接意图，重试校验任务身份；诊断和代理启动移出 UI 耗时路径，状态不变不重复广播。
+- [PR #2](https://github.com/crazysmile-PhD/DesktopTwin/pull/2)：删除 UU 无限恢复及切主机后的后台回连；统一串行操作，手动优先，锁定最多三次纠正并退避；热键改为即时文件通知。
+- [PR #3](https://github.com/crazysmile-PhD/DesktopTwin/pull/3)：连接前自动尝试共享帧缓冲和硬件解码，不新增开关；保留在途重连，主动断开也作废旧启动。
+- [PR #4](https://github.com/crazysmile-PhD/DesktopTwin/pull/4)：设置重连回调缺失时按 60 秒尝试预算结束，保留待应用设置，避免永久停在重连状态。
+- 重写当前使用、架构、诊断与性能文档，删除未测量的性能保证，纠正仓库反馈链接。
+
+自动检查已覆盖 113 项测试，但未建立真实游戏/显卡性能基准。以上源码变更尚未标记新的发行版本。
+
+以下保留历史版本说明；其中当时的设计推断不代表当前实现。当前行为请以 README、架构说明和源码为准。
+
 ## [0.3.0] - 2026-11-18
 
 ### 修复：本地账户保存密码时校验失败

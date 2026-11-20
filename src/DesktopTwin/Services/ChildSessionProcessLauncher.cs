@@ -16,7 +16,7 @@ namespace DesktopTwin.Services;
 ///
 /// 为什么不能直接 <see cref="System.Diagnostics.Process.Start(string)"/>：
 /// 进程只能在自己所属的 Windows 会话里创建窗口，跨会话启动必须借道「任务计划程序」——
-/// 以交互令牌注册一个一次性任务，再用 RunEx 指定目标会话号运行，最后立刻删除任务。
+/// 以交互令牌注册一次性任务，用 RunEx 指定目标会话运行，随后安排延迟清理。
 /// </summary>
 public static class ChildSessionProcessLauncher
 {
@@ -142,7 +142,7 @@ public static class ChildSessionProcessLauncher
     /// <summary>
     /// 清扫上一次异常退出遗留的临时计划任务。
     ///
-    /// 正常流程会在启动后立刻删除任务；如果进程在注册与删除之间被结束，任务就会留在系统里。
+    /// 正常流程会延迟清理任务；如果主程序在清理之前退出，任务可能留在系统里。
     /// 这些残留任务带的是本程序的身份与目标程序路径，必须在下次启动时清掉。
     /// </summary>
     public static void SweepOrphanTasks()
@@ -409,11 +409,8 @@ public static class ChildSessionProcessLauncher
     }
 
     /// <summary>
-    /// 在指定会话里运行一条命令。
-    ///
-    /// 与 <see cref="LaunchProgram"/> 的区别：不校验可执行文件路径——
-    /// 调用方传的是系统自带的 <c>powershell.exe</c>，不是用户选的目标程序。
-    /// 用途是拉起分身端的脚本代理。
+    /// 在指定会话里启动内嵌代理。路径由代理安装服务提供，
+    /// 不经过用户目标程序的路径校验；下发前仍校验会话身份与取消标记。
     /// </summary>
     /// <returns>是否已成功下发启动任务。</returns>
     internal static bool RunInSession(

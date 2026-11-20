@@ -1,329 +1,83 @@
-# 桌面分身 · DesktopTwin
+# DesktopTwin · 桌面分身
 
-把 Windows 自带的**第二个桌面会话**变成桌面上的一扇窗口。
+在窗口里连接 Windows 自带的子会话，让另一组桌面程序在同一台电脑上运行。
 
-同一台电脑、同一个 Windows 用户，同时开两份全屏程序——一份在你原来的桌面上，一份在窗口里。
-窗口里的那一份有自己的任务栏、自己的桌面、自己的键鼠焦点，不会抢走你正在用的鼠标。
+本仓库延续 [batvbs/DesktopTwin](https://github.com/batvbs/DesktopTwin) 的实现；桌面分身代码最初来自 [BetterGI](https://github.com/babalae/better-genshin-impact)。许可证为 GPL-3.0，第三方说明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
-> 本项目把开源项目 [BetterGI](https://github.com/babalae/better-genshin-impact) 中的「桌面分身」功能抽取为独立软件，
-> 只保留与分身相关的部分，不包含任何游戏自动化功能。代码源自 BetterGI，遵循 GPL-3.0。
+## 工作方式
 
----
+程序调用 Windows Child Session API，并用系统的 RDP ActiveX 控件显示子会话。它有另一套桌面、窗口和应用进程，仍使用本机 CPU、GPU、内存与当前账户可访问的文件。它不提供虚拟机或沙盒隔离，也不保证软件能双开。
 
-## 它到底做了什么
+微软将 Child Session 定义为绑定父会话的特殊本机回环远程桌面会话。系统同时只能有一个处于活动且已连接状态的子会话；父会话结束时子会话也会结束。详见 [Child Sessions](https://learn.microsoft.com/en-us/windows/win32/termserv/child-sessions)。本程序另有全局单实例限制。
 
-> **定位先说清楚**：本工具面向「让全屏程序在分身里挂着跑」这类场景，
-> 而不是「两只手同时玩两个号」。原因是 RDP 协议不传递鼠标相对位移，依赖相对鼠标的游戏在分身里转不了视角。
-> 这一点与原版 BetterGI 的差异见 [已知限制](#已知限制) 与 [ROADMAP](ROADMAP.md)。
+## 使用
 
-Windows 本身支持「子会话」（Child Session）：在同一个登录用户下，额外开一个隐藏的桌面会话。
-RDP 客户端可以把某个会话的画面渲染到自己的窗口里，而 `ConnectToChildSession` 这个接口允许**连接本机自己的子会话**。
+1. 在 Windows 上运行构建产物。程序清单要求管理员权限；首次连接前会说明启用系统 Child Sessions 功能。
+2. 点击“启动并连接”。连接完成后，在分身窗口内运行程序，或从控制中心选择要启动的本地 `.exe`。
+3. 需要自动启动目标程序时启用对应设置。程序只在新建会话并完成登录后自动启动目标，接管已有会话时不重复打开。
 
-DesktopTwin 做的事情就是：
+正常的 Child Session 连接会复用父会话身份，不能把“首次必定弹登录框”当成固定流程。若实际出现凭据提示，按提示使用账户凭据；不要从 `C:\Users` 文件夹名称推断登录名。详见 [排查手册](docs/troubleshooting.md)。
 
-1. 调用 `WTSEnableChildSessions(true)` 打开系统的子会话能力；
-2. 用 RDP ActiveX 控件连接本机子会话，把画面嵌进 WPF 窗口；
-3. 你在这个窗口里登录、启动程序，就像在另一台电脑上一样。
-
-**所以它不是虚拟机、不是沙盒、不做任何图形 hook。** 它只是把 Windows 已经具备的能力做成一个顺手的窗口。
-绝大部分「用不了」的情况，根源都在 Windows 的 RDP / 用户 / 组策略设置上，而不是本程序。
-
----
-
-## 环境要求
-
-| 项目 | 要求 |
+| 操作 | 实际效果 |
 | --- | --- |
-| 系统 | Windows 10 / 11（专业版、企业版、教育版为官方支持范围） |
-| 家庭版 | 微软文档标注为不支持，但**实测多数家庭版可用**，程序会提示但不阻止 |
-| 运行权限 | **必须以管理员权限运行**（系统级 API 要求） |
-| 账号 | 需要**有密码**的账户。微软账户一定有；本地账户如果没有密码，RDP 会拒绝登录，见 [排查手册](docs/troubleshooting.md#本地账户没有密码) |
-| 冲突软件 | 不能安装 RDP Wrapper；不建议使用精简版/优化版系统 |
+| 隐藏窗口 | 保留 RDP 连接与分身程序；不代表停止图形处理 |
+| 观看模式 | 屏蔽从此窗口进入分身的键鼠输入，继续显示画面 |
+| UU 切到主机 | 断开分身 RDP，保留分身程序；不再立即后台回连 |
+| 关闭并确认 / 退出 | 注销分身，里面的程序会结束，请先保存工作 |
+| 改声音、系统组合键或分辨率 | 通过现有设置重连流程应用 |
 
-一个 Windows 用户同时只能有**一个**桌面分身。
-<details>
-<summary>本程序不修改、不替换、不破解任何系统文件。</summary>
-本程序调用 Windows 自带的 WTSEnableChildSessions 打开「子会话」能力， 再用系统自带的远程桌面控件（MsRdpClient10）连到本机的那个子会话。 全程只用微软公开的 API 和系统自带组件，没有任何二进制改动。
-    
-#### 实现对比
-| | RDP Wrapper / SuperRDP | 本程序 |
-|---|---|---|
-| 替换 `termsrv.dll` / 投放第三方 DLL | 是 | **否** |
-| 改写 `ServiceDll` 加载项 | 是（指向补丁 DLL） | **否**（只在检测到已被补丁接管时，帮你**还原**成原生值） |
-| 内存补丁 / 进程注入 / hook | 是 | **否** |
-| 依赖 | 逆向出的偏移量 | 公开 API + 公开 COM 组件 |
-| 系统更新后失效 | 常见 | 不受影响 |
-| 杀软误报 | 风险较高（DLL 劫持特征明显） | 仍有（管理员权限 + 改 RDP 设置），但无劫持特征 |
+## 画面与性能
 
-#### 性能对比
-| | RDP Wrapper / SuperRDP | 本程序 |
-|------|--------------------------------|-------------------|
-| CPU 占用 | 较低（RDP 协议栈轮询、桌面变化检测） | 极低（无协议栈开销） |
-| GPU 视频编码 | 持续较低占用 （H.264 硬件编码） | 无（无需编码） |
-| GPU 视频解码 | 持续较低占用 （视频解码渲染到窗口） | 无（直接映射） |
-| 内存占用 | ~50-100MB（RDP 客户端 + 缓冲区） | ~10-20MB（ActiveX 控件） |
-| 输入延迟 | 经 RDP 管道，额外 1-3ms | 0 |
-| 画面质量 | 有压缩伪影（H.264 块效应，快速移动场景明显） | 无损，直接映射 |
-| 桌面帧率 | 受编码帧率限制（可配置） | 受子会话 DWM 刷新率限制（通常 60fps） |
+本机连接不等于零开销。另一个游戏进程、子会话桌面、RDP 显示与 UU 串流都可能占用资源；隐藏窗口也不是注销。
 
-**RDP Wrapper / SuperRDP走完整 RDP 协议栈**：桌面捕获 → H.264 视频编码 → 环回网络传输 → 视频解码渲染。而桌面分身直接通过 DWM 内部通道共享子桌面，中间环节全部跳过，因此轻量得多。
+连接前程序自动尝试共享帧缓冲和硬件解码两项优化。不支持的属性会被跳过，不增加用户开关。日志中的“属性接受”只表示请求被接受，不能证明实际协商启用，更不能推导出固定帧率、零延迟、无损显示或某个内存占用。接口定义见 [IMsRdpExtendedSettings.Property](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)。
 
-#### 总结
+低帧率、操作等待与高占用要分别测量，步骤见 [性能排查](docs/performance.md)。当前没有发布覆盖各显卡、Windows 版本与游戏的性能基准。
 
-**如果你不需要这些，请用桌面分身：**
-- 多用户同时登录（办公、测试环境）
-- 音频/USB/打印机重定向
-- 使用 Windows 7/8（不支持 Child Session）
+## UU 视角切换
 
-**如果你主要是游戏挂机/自动化，建议用桌面分身：**
-- 分身内的自动化键盘鼠标操作，不会打扰你使用电脑
-- CPU/GPU 开销最低，不影响游戏性能
-- 不需要远程，只需本地隔离运行
-- 不需要持久化，随开随关
-- 对画质敏感，不希望有压缩伪影
-- 需要最低输入延迟
-</details>
----
+默认关闭，开启后可用菜单或热键在主机与分身之间切换。实现会改变分身连接状态，并结束 `GameViewerServer` 进程，等待 UU 服务重新拉起串流端。UU 如何选择会话属于外部行为，程序只能根据实际观测确认目标。
 
-## 快速开始
+- 串流端 15 秒内未出现在目标会话，就报告未确认；不会启动无限后台服务恢复。
+- 没有串流端时，只能确认分身的连接/断开状态，不能保证下一次 UU 连接的目标。
+- “修复 UU 串流”是用户主动请求的服务重启，与切换共用串行入口。
+- 可选的“UU 视角锁定”在会话或串流进程变化时检查。手动操作优先；自动纠正最多三次，按 5 秒、10 秒退避，仍不稳定则关闭并提示。
 
-### 使用
+## 环境与限制
 
-1. 从 [Releases](../../releases) 下载两个版本中的一个，放到固定目录
-   （**不要放在 `Downloads` 这类多人可写的目录里**，本程序以管理员权限运行）：
+目标运行环境为 Windows 10/11，依赖 Windows 的 RDP ActiveX、Child Session API 和任务计划程序。框架依赖产物需要 .NET 10 Desktop Runtime；自带运行时产物不需要另装它。具体 SKU、补丁、策略及驱动组合是否可用，需要实际验证；家庭版上的提示不是完整兼容性结论。
 
-   | 文件 | 说明 | 适用 |
-   | --- | --- | --- |
-   | `DesktopTwin-<版本>.exe` | 自带 .NET 运行时，双击就能跑，约 70 MB | **不确定就选这个** |
-   | `DesktopTwin-<版本>-NET10.exe` | 约 7 MB，需先装 [.NET 10 桌面运行时](https://dotnet.microsoft.com/download/dotnet/10.0) | 已经装了 .NET 10，或想省空间 |
+当前分身代理只负责热键与状态反馈，没有实现相对鼠标转发。因此不能保证需要鼠标锁定或相对位移的游戏可正常转动视角。微软在部分新版系统提供相关扩展属性，但本项目尚未接入并验证，见 [路线图](ROADMAP.md)。
 
-   两个版本**功能完全一样**，不用都下。Release 页还有一份 `README.txt`，
-   内容和下面这几条一致。
+诊断面板包含环境检查与显式修复。部分检查是程序的启发式判断，不等于 Windows 官方前置条件。修复可能改注册表、服务、计划任务或系统文件；具体范围见 [诊断与修复边界](docs/auto-repair-feasibility.md)。
 
-   > 装运行时请选「.NET Desktop Runtime」，不是「ASP.NET Core Runtime」。
-   > 装错了程序会提示缺少 `Microsoft.WindowsDesktop.App`。
-   >
-   > 文件名可以随便改，放在带中文或空格的路径下也不影响运行。
+## 从源码构建
 
-2. 以管理员权限运行它；
-3. 点标题栏的 **启动**；
-4. 首次会显示 Windows 登录界面，输入**当前账户的用户名和密码**
-   （用户名以 `C:\Users` 下属于你的那个文件夹名为准）；
-5. 登录完成后窗口里就是一个完整的桌面，可以像平时一样启动程序；
-6. 想让某个程序每次自动出现在分身里：**控制中心 → 选择要在分身中运行的程序…**。
-
-关闭窗口会**注销分身会话**，里面所有程序都会被关闭，请提前保存。
-
-> **下载后先校验，再运行**
->
-> `README.txt` 的末尾列了两个 exe 各自的 SHA256，核对方法：
->
-> ```powershell
-> Get-FileHash ".\DesktopTwin-<版本>.exe" -Algorithm SHA256
-> ```
->
-> 本项目**没有代码签名证书**，所以双击 exe 时 Windows 会拦一道：
-> SmartScreen 提示「阻止了无法识别的应用启动」，提权时 UAC 显示「未知发布者」。
-> 这两处都是**声誉判定**，不是病毒检出——未签名的文件无法确认发布者，属预期行为。
->
-> 判断能不能放行的依据是**哈希一致**，不是提示本身。确认无误后，
-> 先 `Unblock-File` 或右键 exe → 属性 → 解除锁定，之后启动就不会再弹。
-> 详细说明见 [排查手册 · 启动之前](docs/troubleshooting.md#启动之前)。
-
-### 从源码构建
-
-需要 .NET SDK 10.0 或更高版本。
+在 Windows 上安装 .NET SDK 10 或能构建此目标的更新 SDK。构建还使用系统 .NET Framework 的 C# 编译器生成嵌入式代理。
 
 ```powershell
-git clone https://github.com/batvbs/DesktopTwin.git desktop-twin
-cd desktop-twin
-dotnet build -c Release
-dotnet publish src/DesktopTwin -c Release -r win-x64 --self-contained false -o publish
+git clone https://github.com/crazysmile-PhD/DesktopTwin.git
+cd DesktopTwin
+dotnet build DesktopTwin.sln -c Release -warnaserror
+dotnet test DesktopTwin.sln -c Release --no-build
 ```
 
-产物在 `publish\DesktopTwin.exe`（框架依赖，需要目标机安装 .NET 10 桌面运行时）。
-如需免安装运行时，把 `--self-contained false` 换成 `--self-contained true`。
+框架依赖发布示例：
 
----
-
-## 功能
-
-| 功能 | 说明 |
-| --- | --- |
-| 启动 / 注销分身 | 一键创建、连接、注销第二个桌面会话 |
-| 在分身中启动程序 | 通过任务计划程序把任意 exe 启动到分身会话；可选是否提权 |
-| 连接后自动启动 | 记住目标程序，连接成功自动拉起 |
-| 观看模式 | 只显示画面，本机键鼠不进入分身 |
-| 系统组合键 | 可选 Alt+Tab / Windows 键在本机生效还是发到分身 |
-| 音频 | 可单独静音分身，不影响主桌面 |
-| 分辨率 | 1920×1080 / 2560×1440 / 1600×900 / 1280×720，或自定义（640×480 ~ 7680×4320） |
-| 窗口 | 自适应或 1:1、保持 16:9、置顶、小窗模式、位置记忆 |
-| 快捷键注入 | 向分身发送 Win+D / Win+Tab |
-| 全屏模式 | 点最大化即铺满整屏；鼠标到屏幕顶端浮出工具栏，可固定并记住 |
-| 托盘图标 | 常驻通知区域；窗口隐藏后可从托盘唤回，右键可显示/隐藏/全屏/退出 |
-| 诊断与修复 | 启动失败自动弹出；分警告/提示/已解决三档，可自动修复的直接给按钮 |
-| UU 视角切换 | 可选全局热键，在「UU 控制整台电脑」与「UU 控制桌面分身」之间切换（默认关闭） |
-| 自动登录 | 可选。DPAPI 加密保存密码，连接时静默认证；保存时可当场验证凭据 |
-| 环境预检 | 启动前检查版本、RDP 开关、Windows Hello 限制、RDP 补丁、服务状态 |
-| 诊断 | 一键复制环境快照、打开日志目录 |
-| 界面语言 | 内置简体中文；同目录放一个 `<程序名>.lng` 即可换成别的语言 |
-
----
-
-## 界面语言
-
-程序**只内置简体中文**。换语言的方式是放一个文件：
-
-- 位置：与 exe 同目录、同文件名，扩展名换成 `.lng`
-  （`DesktopTwin.exe` → `DesktopTwin.lng`；把 exe 改名，文件名跟着改）；
-- 格式：UTF-8 纯文本，`键=值`，`#` 或 `;` 开头是注释；
-
-现成的英文译文和完整的制作流程见 [`Localization`](Localization/)。
-
-## 已知限制
-
-这些限制来自 Windows 本身，不是本程序的 bug：
-
-- **鼠标相对移动**：RDP 协议不传递鼠标的「相对位移」。射击类游戏需要相对鼠标，本程序目前**不提供**该能力。
-  BetterGI 是通过在主桌面捕获相对位移、转发给分身里的另一个 BetterGI 进程注入实现的，属于双进程架构，本项目暂未实现（见 ROADMAP）。
-- **分身内提权**：在分身里对程序点「以管理员运行」是否成功**取决于环境**——有人能正常弹出 UAC，有人会失败。
-  失败时请用 **控制中心 → 以管理员权限启动目标程序**，由本程序从外部启动。
-- **不能双开的软件**：Chrome、部分启动器等只允许单实例的程序，在两个桌面里同时运行会互相抢占（通常表现为其中一个一直等待）。
-- **开机启动项会重复启动**：分身会话登录后，部分自启动软件会再启动一份，可能冲突。
-- **远程控制软件**：UU 远程等不支持多用户的工具，可能会连到分身桌面上去。
-
----
-
-## 常见问题
-
-**连接失败 / 提示 516（RDP 连接已断开）**
-这是一个通用错误，原因很多。依次尝试：重启本程序 → 重启系统 → 检查 `fDenyTSConnections` 是否为 1 → 确认没有装 RDP Wrapper。
-程序在连接失败时会把环境预检结论一起写进日志和提示，先看那里。
-
-**密码怎么输都不对**
-1. 打开「设置 → 账户 → 登录选项」，**关闭**「为了提高安全性，仅允许对此设备上的 Microsoft 帐户使用 Windows Hello 登录」；
-2. 用 `runas /u:MicrosoftAccount\<你的微软账户> winver` 刷新一次本地凭据缓存；
-3. 仍然不行时，改用本地账户登录 Windows。
-
-**每次启动都要输密码**
-用 PIN 登录时，系统每次都会要求凭据。可以让 Windows 自动登录（`netplwiz`，取消勾选「要使用本计算机，用户必须输入用户名和密码」，
-密码填 Microsoft 账户密码而不是 PIN）。
-
-**提示「不支持该请求」**
-目标程序要求提权，而分身内的 UAC 在当前环境不可用。请用 **控制中心 → 以管理员权限启动目标程序**。
-
-**关机时提示「还有其他用户正在使用此电脑」**
-那是分身会话还登录着，Windows 只是提醒，不会阻止关机——照常点关机，分身会话随之结束
-（分身里未保存的内容会丢）。若关机界面列出「这些应用阻止关机」，说明分身里有程序
-没响应关机请求（例如有未保存的文档），**点「仍要关机」即可继续**，不必切回分身；
-想让那个程序正常保存，再切回分身处理。想提前清掉会话：
-任务管理器 → 用户 → 右键同名用户 → 注销（不影响关机，只是释放资源）。
-
-更多排查见 [docs/troubleshooting.md](docs/troubleshooting.md)。
-
----
-
-## 与 RDP Wrapper / SuperRDP 的区别
-
-**本程序不修改、不替换、不破解任何系统文件。**
-
-RDP Wrapper、SuperRDP 这类工具的原理是：把 `TermService` 的 `ServiceDll` 指向自己投放的
-`rdpwrap.dll` / `superrdp.dll`，由这个 DLL 接管 `termsrv.dll` 的调用，从而解除「只允许一个
-远程会话」的限制。这套做法要**往系统目录放 DLL 并改写服务的加载项**，补丁与 Windows 内部版本
-强绑定（靠 `rdpwrap.ini` 里的偏移量），系统一更新就常失效，也容易被杀软判为劫持。
-
-本程序走的是另一条路：调用 Windows 自带的 `WTSEnableChildSessions` 打开「子会话」能力，
-再用系统自带的远程桌面控件（`MsRdpClient10`）连到本机的那个子会话。
-**全程只用微软公开的 API 和系统自带组件，没有任何二进制改动。**
-
-| | RDP Wrapper / SuperRDP | 本程序 |
-|---|---|---|
-| 替换 `termsrv.dll` / 投放第三方 DLL | 是 | **否** |
-| 改写 `ServiceDll` 加载项 | 是（指向补丁 DLL） | **否**（只在检测到已被补丁接管时，帮你**还原**成原生值） |
-| 内存补丁 / 进程注入 / hook | 是 | **否** |
-| 依赖 | 逆向出的偏移量 | 公开 API + 公开 COM 组件 |
-| 系统更新后失效 | 常见 | 不受影响 |
-| 杀软误报 | 风险较高（DLL 劫持特征明显） | 仍有（管理员权限 + 改 RDP 设置），但无劫持特征 |
-
-不过要说清楚：本程序**确实会改动系统状态**，只是改的都是设置项，不是文件。
-
-| 改动 | 时机 | 如何还原 |
-|---|---|---|
-| `WTSEnableChildSessions(true)` 打开子会话 | 首次启动分身 | 控制中心 → 诊断 → 关闭 Child Sessions（恢复系统原状） |
-| 临时计划任务（把进程送进子会话） | 每次在分身里启动程序 | 启动后立即删除；异常残留会在下次启动清扫 |
-| `fDenyTSConnections` 改为 0 | 你在诊断面板点「修复」并确认 | 改回 1，或在系统设置里关闭远程桌面 |
-| `DevicePasswordLessBuildVersion` 改为 0 | 同上 | 在「设置 → 账户 → 登录选项」重新打开 |
-| `ServiceDll` 还原为原生 `termsrv.dll` | 同上（仅当检测到被补丁接管） | 重装补丁工具 |
-
-后三项都在**诊断与修复**面板里，每次执行前都会弹确认框写明改什么、影响什么；
-程序不会在后台静默改这些值。源码里所有注册表写入都集中在 `EnvironmentFixer` 一处，可以直接核对。
-
----
-
-## 安全声明
-
-- 本程序**以管理员权限运行**，并会调用 `WTSEnableChildSessions(true)` 修改系统的子会话开关。
-  该开关是系统级持久设置，可用 **控制中心 → 诊断 → 关闭 Child Sessions（恢复系统原状）** 还原；
-  程序**不会**在退出时自动改回去（那会悄悄改掉用户可能已经适应的系统状态）。
-- 在分身中启动程序时，本程序会临时注册一个计划任务（启动后立即删除），
-  这是把进程送进另一个会话的**唯一**系统支持方式。异常退出可能残留任务，下次启动会自动清扫。
-- 本程序不联网、不监听端口、不上传任何数据；RDP 连接目标固定为本机回环地址。
-- 日志与设置只写在 `%AppData%\DesktopTwin\`。
-- **它不是沙盒，也不是安全边界。** 分身会话与你的主桌面属于同一个 Windows 账户、同一个用户配置文件、
-  同一套文件权限，分身里能做的事在主桌面同样能做。请不要把桌面分身当成隔离不可信程序的手段。
-- **设置文件按当前用户授权。** `%AppData%\DesktopTwin\settings.json` 记录了「要启动哪个程序」。
-  如果你把这个文件交给别人、或用共享账户运行本程序，对方就可以让本程序在管理员权限下启动任意本地 exe。
-  提权启动因此**永远需要你手动确认一次**，不会自动执行。
-- **关于杀毒软件误报**：本程序的行为组合（要求管理员权限、修改 RDP 相关设置、跨会话提权启动进程、
-  屏蔽输入窗口）与部分恶意软件的行为特征重合，存在被杀软拦截或误报的可能。
-  请以源码为准，或自行从源码构建。遇到拦截时，请把日志与拦截截图提交到 Issue。
-- 请在**你自己拥有或已获授权**的设备上使用。绕过软件的多开限制可能违反其服务条款，风险由使用者承担。
-
----
-
-## 与 BetterGI 的关系
-
-- 代码来源：BetterGI 的 `ChildSession` 相关实现（`ChildSessionService` / `ChildSessionNativeMethods` /
-  `ChildSessionProcessLauncher` / `ChildSessionEnvironmentCheck` / `RdpActiveXHost` 与相关窗口、行为类）。
-- 本项目只做抽取与解耦：去掉配置中心、i18n、日志框架、游戏自动化等依赖，换成独立的设置服务与文件日志。
-- BetterGI 是 GPL-3.0，因此本项目同样使用 GPL-3.0，详见 [LICENSE](LICENSE) 与 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
-- 与 BetterGI 团队无隶属关系，本项目为其功能的独立衍生实现。
-
----
-
-## 项目结构
-
-```
-src/DesktopTwin/
-├─ Interop/          与 Windows 打交道的部分（wtsapi32、user32、RDP ActiveX）
-├─ Services/         会话编排、进程启动、环境预检、设置、日志
-├─ Models/           设置模型与事件参数
-├─ View/             主窗口、对话框、行为（拖拽 / 宽高比 / 尺寸记忆）
-├─ ViewModel/        界面状态与命令
-└─ app.manifest      requireAdministrator
-docs/                架构说明、排查手册、路线图
+```powershell
+dotnet publish src/DesktopTwin/DesktopTwin.csproj -c Release -r win-x64 --self-contained false -o publish
 ```
 
-设计说明见 [docs/architecture.md](docs/architecture.md)。
+`publish\DesktopTwin.exe` 依赖同目录发布文件与目标机运行时。发布流程中的单文件/自带运行时选项见 [.github/workflows/build.yml](.github/workflows/build.yml)。源码 `main` 的修复不代表已存在对应版本的 Release 包。
 
----
+## 设置、日志与文档
 
-## English
+设置位于 `%AppData%\DesktopTwin\settings.json`，日志位于 `%AppData%\DesktopTwin\logs\`。保存的自动登录密码用 Windows DPAPI 的当前用户作用域保护；启用此功能前无需打开 Windows 系统自动登录。
 
-**DesktopTwin** turns the Windows RDP *Child Session* into a normal window, so you can run a second full desktop
-— with its own taskbar, focus and input — on the same machine and the same user account.
+界面内置简体中文，可放置同目录、同基础文件名的 `.lng` 文件替换译文，详见 [本地化说明](Localization/README.md)。
 
-It is an extraction of the "desktop clone" feature from [BetterGI](https://github.com/babalae/better-genshin-impact),
-with all game automation removed. Requires Windows 10/11 (Pro/Enterprise/Education officially supported; Home usually
-works but is unsupported by Microsoft), administrator privileges, and an account with a password.
-
-Known limitation: relative mouse movement is not forwarded (RDP protocol limitation), so first-person games that
-capture the cursor are not supported yet. See [ROADMAP.md](ROADMAP.md).
-
-Licensed under GPL-3.0. Not affiliated with the BetterGI team.
-
----
-
-## 许可证
-
-GPL-3.0-or-later，见 [LICENSE](LICENSE)。
+- [排查手册](docs/troubleshooting.md)：连接、凭据、黑屏、UU 与反馈信息。
+- [性能排查](docs/performance.md)：区分帧率、等待与资源占用。
+- [架构](docs/architecture.md)：线程、操作边界和等待预算。
+- [参与开发](CONTRIBUTING.md)：构建、测试和人工验证范围。
+- [变更记录](CHANGELOG.md)：历史版本；当前行为以本说明及代码为准。
