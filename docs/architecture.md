@@ -20,7 +20,13 @@
 
 `DesktopViewport` 根据 `DesktopAspectRatio` 测量并安排 `WindowsFormsHost` 的实际矩形，不使用视觉变换缩放原生 HWND。窗口贴边、调整尺寸、隐藏恢复及分辨率变更均由 WPF 布局重新计算；多余空间露出父容器的黑色背景，不再改写系统分屏给出的外层窗口尺寸。比例固定跟随分身分辨率，旧版 `KeepAspectRatio` 设置不再参与运行。
 
-`SmartSizing` 继续控制 RDP 内部的自适应重采样或 1:1 显示。全屏只管理显示器边界、临时缩放设置和 1:1 居中所需的边距，等比布局与窗口模式共用。布局测试核对半屏、宽屏、自定义比例、分辨率切换、隐藏恢复和未连接 ActiveX 的实际 HWND 边界；已连接会话的渲染与游戏鼠标仍需单独验证。
+默认的 `AutomaticDesktopSize` 根据内容区物理像素和本机 DPI 计算 `RdpDisplaySettings`，初次连接即使用该尺寸；联机变化通过 300 毫秒合并的 `UpdateSessionDisplaySettings` 请求处理，不触发设置重连。日志区分请求接受和 `OnRemoteDesktopSizeChange` 确认；界面始终按回报的实际尺寸显示，拒绝或两秒内未确认时提示一次。不会因为尺寸更新失败自动断开或注销。接口依据为微软的 [UpdateSessionDisplaySettings](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/mt703457(v=vs.85)) 和 [缩放属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)。
+
+固定分辨率继续使用 `SmartSizing` 控制等比重采样或 1:1 显示。`WindowPlacement` 在物理像素坐标中处理工作区边界，允许其他显示器合法的负坐标。启动先恢复已有位置，再约束整个窗口；`WM_MOVING` 在拖动矩形生效前保留完整标题栏，显示器/DPI 改变与隐藏恢复也会检查位置。全屏由原有逻辑负责，普通窗口约束会跳过全屏。
+
+设计参考 [Cockburn、Karlson、Bederson 的综述](https://www.csse.canterbury.ac.nz/andrew.cockburn/papers/fc.pdf) 对全局视图与细节导航的取舍，以及 [Windows 多显示器定位说明](https://learn.microsoft.com/en-us/windows/win32/gdi/positioning-objects-on-multiple-display-monitors)。适应窗口默认和合并等待是本项目的实现选择。
+
+布局测试覆盖半屏、宽屏、自定义比例、负坐标恢复、缩入工作区、DPI 换算、拖动约束、隐藏恢复和未连接 ActiveX 的实际 HWND 边界；已连接 Child Session 的动态分辨率协商、渲染与游戏鼠标仍需单独验证。
 
 ## 连接
 

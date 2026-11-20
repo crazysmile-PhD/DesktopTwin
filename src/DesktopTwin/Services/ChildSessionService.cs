@@ -280,9 +280,26 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 分身桌面的逻辑分辨率。
     /// </summary>
-    public DrawingSize DesktopSize => new(
-        _settings.Current.Session.DesktopWidth,
-        _settings.Current.Session.DesktopHeight);
+    public DrawingSize DesktopSize => _settings.Current.Session.AutomaticDesktopSize && _desktopWindow is { IsLoaded: true }
+        ? _desktopWindow.GetWindowDisplaySettings().DesktopSize
+        : new(_settings.Current.Session.DesktopWidth, _settings.Current.Session.DesktopHeight);
+
+    /// <summary>实际回报的远端尺寸，尚无回报时使用当前请求尺寸。</summary>
+    public DrawingSize RenderedDesktopSize => _desktopWindow?.RdpHost.ReportedDesktopSize ?? DesktopSize;
+
+    /// <summary>启用按窗口调整桌面分辨率，保留固定分辨率供手动切换。</summary>
+    public void UseAutomaticDesktopSize()
+    {
+        ThrowIfDisposed();
+        _settings.Current.Session.AutomaticDesktopSize = true;
+        _settings.Current.Session.SmartSizing = true;
+        _settings.SaveSoon();
+        DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
+        RefreshState(Locale.Get("Svc.Status.AutomaticResolution"));
+    }
+
+    private void OnRdpDesktopSizeChanged(object? sender, EventArgs e) =>
+        DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
     /// 普通窗口模式的记忆位置。
@@ -817,6 +834,7 @@ public sealed class ChildSessionService : IDisposable
                     SessionSettings.MaxDesktopHeight));
         }
 
+        _settings.Current.Session.AutomaticDesktopSize = false;
         _settings.Current.Session.DesktopWidth = width;
         _settings.Current.Session.DesktopHeight = height;
         _settings.SaveSoon();
@@ -1204,6 +1222,7 @@ public sealed class ChildSessionService : IDisposable
             _desktopWindow.IsVisibleChanged -= OnDesktopWindowVisibilityChanged;
             _desktopWindow.RdpHost.ConnectionFailed -= OnRdpConnectionFailed;
             _desktopWindow.RdpHost.LoginCompleted -= OnRdpLoginCompleted;
+            _desktopWindow.RdpHost.DesktopSizeChanged -= OnRdpDesktopSizeChanged;
             TryDisconnectRdpHost();
         }
 
@@ -1282,6 +1301,7 @@ public sealed class ChildSessionService : IDisposable
         _desktopWindow.IsVisibleChanged += OnDesktopWindowVisibilityChanged;
         _desktopWindow.RdpHost.ConnectionFailed += OnRdpConnectionFailed;
         _desktopWindow.RdpHost.LoginCompleted += OnRdpLoginCompleted;
+        _desktopWindow.RdpHost.DesktopSizeChanged += OnRdpDesktopSizeChanged;
         _desktopWindow.RdpHost.SetCredentialProvider(ProvideAutoLoginCredential);
         _desktopWindow.RdpHost.SetSmartSizing(_settings.Current.Session.SmartSizing);
         _desktopWindow.RdpHost.SetSendSystemShortcutsToRemote(SendSystemShortcutsToRemote);

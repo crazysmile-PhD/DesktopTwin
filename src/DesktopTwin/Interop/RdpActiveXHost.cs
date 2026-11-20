@@ -48,6 +48,12 @@ internal sealed class RdpActiveXHost : AxHost
     private int _reconnectGeneration;
     private DrawingSize? _pendingReconnectDesktopSize;
     private bool _smartSizingEnabled = true;
+    private bool _displayReady;
+    private RdpDisplaySettings? _lastDisplayRequest;
+    internal DrawingSize? ReportedDesktopSize { get; private set; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal uint DesktopScaleFactor { get; set; } = 100;
+    internal event EventHandler? DesktopSizeChanged;
     private readonly RdpSmartSizingController _smartSizing;
     private bool _inputBlocked;
     private Func<(string UserName, string Domain, string Password)?>? _credentialProvider;
@@ -104,6 +110,9 @@ internal sealed class RdpActiveXHost : AxHost
 
         ChildSessionNativeMethods.ClearRdpInputWindowCache(Handle);
         var client = GetRequiredOcx();
+        _displayReady = false;
+        _lastDisplayRequest = null;
+        ReportedDesktopSize = null;
         var width = Math.Clamp(desktopSize.Width, 200, 8192);
         var height = Math.Clamp(desktopSize.Height, 200, 8192);
 
@@ -163,6 +172,8 @@ internal sealed class RdpActiveXHost : AxHost
         {
             var extendedSettings = (IMsRdpExtendedSettings)client;
             TrySetExtendedProperty(extendedSettings, "EnableZoom", true);
+            TrySetExtendedProperty(extendedSettings, "DesktopScaleFactor", DesktopScaleFactor);
+            TrySetExtendedProperty(extendedSettings, "DeviceScaleFactor", (uint)100);
             var accepted = RdpLocalGraphicsOptions.Apply((name, enabled) =>
             {
                 object value = enabled;
@@ -246,6 +257,29 @@ internal sealed class RdpActiveXHost : AxHost
             ?? throw new COMException(Locale.Get("Rdp.Error.AdvancedSettings"));
         RunComStep(Locale.Get("Rdp.Step.DisplayScale"), () =>
             SetComProperty(advancedSettings, "SmartSizing", enabled));
+    }
+
+    /// <summary>联机更新分辨率，不断开会话；返回成功只代表请求被接受。</summary>
+    internal bool UpdateDesktopDisplay(RdpDisplaySettings settings)
+    {
+        if (!_displayReady || ConnectedState != 1) return true;
+        if (_lastDisplayRequest == settings) return true;
+        _lastDisplayRequest = settings;
+        try
+        {
+            InvokeComMethod(GetRequiredOcx(), "UpdateSessionDisplaySettings",
+                (uint)settings.DesktopSize.Width, (uint)settings.DesktopSize.Height,
+                settings.PhysicalWidth, settings.PhysicalHeight, (uint)0, settings.ScaleFactor, (uint)100);
+            AppLog.Info($"已请求窗口桌面尺寸 {settings.DesktopSize.Width}×{settings.DesktopSize.Height}，"
+                + $"DPI={settings.ScaleFactor}%；实际尺寸等待 RDP 回调确认。");
+            return true;
+        }
+        catch (Exception error) when (error is COMException or MissingMemberException
+            || error is TargetInvocationException { InnerException: COMException })
+        {
+            AppLog.Warn("RDP 未接受窗口分辨率更新，保留当前桌面与等比显示，不自动重连。", error);
+            return false;
+        }
     }
 
     private void RefreshSmartSizing()
@@ -531,6 +565,24 @@ internal sealed class RdpActiveXHost : AxHost
 
     private void OnLoginComplete()
     {
+        _displayReady = true;
+        _lastDisplayRequest = null;
+        try
+        {
+            var client = GetRequiredOcx();
+            var width = Convert.ToInt32(GetComProperty(client, "DesktopWidth"), CultureInfo.InvariantCulture);
+            var height = Convert.ToInt32(GetComProperty(client, "DesktopHeight"), CultureInfo.InvariantCulture);
+            if (width > 0 && height > 0)
+            {
+                ReportedDesktopSize = new DrawingSize(width, height);
+                DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception error) when (error is COMException
+            || error is TargetInvocationException { InnerException: COMException })
+        {
+            AppLog.Warn("登录后读取远端桌面尺寸失败，等待尺寸回调。", error);
+        }
         _connectionAttemptInProgress = false;
         _connectionFailureReported = false;
         _lastConnectionDiagnostic = null;
@@ -539,6 +591,7 @@ internal sealed class RdpActiveXHost : AxHost
 
     private void OnDisconnected(int disconnectReason)
     {
+        _displayReady = false;
         var failedWhileConnecting = _connectionAttemptInProgress;
         _connectionAttemptInProgress = false;
 
@@ -1128,6 +1181,12 @@ internal sealed class RdpActiveXHost : AxHost
 
         public void OnRemoteDesktopSizeChange(int width, int height)
         {
+            if (width <= 0 || height <= 0) return;
+            var size = new DrawingSize(width, height);
+            if (owner.ReportedDesktopSize == size) return;
+            owner.ReportedDesktopSize = size;
+            AppLog.Info($"RDP 确认桌面尺寸 {width}×{height}。");
+            owner.DesktopSizeChanged?.Invoke(owner, EventArgs.Empty);
         }
 
         public void OnIdleTimeoutNotification()

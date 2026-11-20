@@ -1,9 +1,11 @@
 using System;
 using System.ComponentModel;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using DesktopTwin.Interop;
 using DesktopTwin.Models;
@@ -20,9 +22,6 @@ namespace DesktopTwin.View.Behaviors;
 /// </summary>
 public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
 {
-    private const int MinimumVisibleWidth = 120;
-    private const int MinimumVisibleTitleBarHeight = 32;
-
     /// <summary>
     /// 目标窗口宽度（设备无关像素）。
     /// </summary>
@@ -85,6 +84,8 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
     private DispatcherTimer? _savePositionTimer;
     private bool _activeSmallWindowMode;
     private bool _isApplyingPlacement;
+    private HwndSource? _source;
+    private bool _positionCorrectionPending;
 
     /// <summary>
     /// 目标窗口宽度。
@@ -206,7 +207,11 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
             Interval = TimeSpan.FromMilliseconds(300)
         };
         _savePositionTimer.Tick += OnSavePositionTimerTick;
-        RestoreWindowPosition(_activeSmallWindowMode);
+        _source = HwndSource.FromHwnd(new WindowInteropHelper(_window).Handle);
+        _source?.AddHook(WindowProc);
+        // 首次恢复前不能保存当前临时位置，否则会覆盖待恢复的旧位置。
+        _isApplyingPlacement = true;
+        _ = _window.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(ResizeWindowCore));
     }
 
     private void DetachWindow()
@@ -227,13 +232,15 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
         }
 
         _isApplyingPlacement = false;
+        _source?.RemoveHook(WindowProc);
+        _source = null;
         _window = null;
     }
 
     private void ResizeWindow()
     {
         AttachWindow();
-        if (_window is null)
+        if (_window is null || _isApplyingPlacement)
         {
             return;
         }
@@ -323,6 +330,10 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
         {
             SaveActiveWindowPosition();
         }
+        else
+        {
+            SchedulePositionCorrection(fitWindow: true);
+        }
     }
 
     private void OnWindowClosing(object? sender, CancelEventArgs e)
@@ -333,6 +344,7 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
     private void OnSavePositionTimerTick(object? sender, EventArgs e)
     {
         _savePositionTimer?.Stop();
+        CorrectCurrentPosition(fitWindow: false);
         SaveActiveWindowPosition();
     }
 
@@ -351,7 +363,8 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
             return;
         }
 
-        UpdateStoredPosition(isSmallWindowMode, bounds.Left, bounds.Top);
+        var corrected = ConstrainBounds(bounds, fitWindow: false);
+        UpdateStoredPosition(isSmallWindowMode, corrected.Left, corrected.Top);
     }
 
     private void RestoreWindowPosition(bool isSmallWindowMode)
@@ -364,17 +377,15 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
         var storedPosition = isSmallWindowMode ? SmallWindowPosition : NormalWindowPosition;
         var desiredLeft = storedPosition?.Left ?? windowBounds.Left;
         var desiredTop = storedPosition?.Top ?? windowBounds.Top;
-        var correctedPosition = EnsureVisiblePosition(
-            desiredLeft,
-            desiredTop,
-            windowBounds.Width,
-            windowBounds.Height);
+        var correctedPosition = ConstrainBounds(new DrawingRectangle(
+            desiredLeft, desiredTop, windowBounds.Width, windowBounds.Height), fitWindow: true);
 
         var handle = new WindowInteropHelper(_window!).Handle;
         if (handle != IntPtr.Zero &&
-            (windowBounds.Left != correctedPosition.Left || windowBounds.Top != correctedPosition.Top))
+            windowBounds != correctedPosition)
         {
-            WindowNativeMethods.MoveWindow(handle, correctedPosition.Left, correctedPosition.Top);
+            WindowNativeMethods.SetWindowBounds(handle, correctedPosition.Left, correctedPosition.Top,
+                correctedPosition.Width, correctedPosition.Height);
         }
 
         if (storedPosition is not null)
@@ -417,55 +428,56 @@ public sealed class WindowResizeBehavior : Behavior<FrameworkElement>
         BindingOperations.GetBindingExpression(this, positionProperty)?.UpdateSource();
     }
 
-    private static WindowPosition EnsureVisiblePosition(
-        int left,
-        int top,
-        int width,
-        int height)
+    private DrawingRectangle ConstrainBounds(DrawingRectangle bounds, bool fitWindow)
     {
-        var screens = FormsScreen.AllScreens;
-        if (screens.Length == 0)
-        {
-            return new WindowPosition(left, top);
-        }
-
-        var visibleTitleBarWidth = Math.Min(width, MinimumVisibleWidth);
-        var visibleTitleBarHeight = Math.Min(height, MinimumVisibleTitleBarHeight);
-        var titleBarBounds = new DrawingRectangle(left, top, width, visibleTitleBarHeight);
-        if (screens.Any(screen =>
-                DrawingRectangle.Intersect(titleBarBounds, screen.WorkingArea) is var intersection &&
-                intersection.Width >= visibleTitleBarWidth &&
-                intersection.Height >= visibleTitleBarHeight))
-        {
-            return new WindowPosition(left, top);
-        }
-
-        var targetWorkArea = screens
-            .Select(screen => screen.WorkingArea)
-            .OrderBy(workArea => DistanceSquaredToRectangle(left, top, workArea))
-            .First();
-        var correctedLeft = width <= targetWorkArea.Width
-            ? Math.Clamp(left, targetWorkArea.Left, targetWorkArea.Right - width)
-            : targetWorkArea.Left;
-        var correctedTop = height <= targetWorkArea.Height
-            ? Math.Clamp(top, targetWorkArea.Top, targetWorkArea.Bottom - height)
-            : targetWorkArea.Top;
-        return new WindowPosition(correctedLeft, correctedTop);
+        var dpi = _window is null ? 1 : VisualTreeHelper.GetDpi(_window).DpiScaleY;
+        return WindowPlacement.Constrain(bounds,
+            FormsScreen.AllScreens.Select(screen => screen.WorkingArea).ToArray(), fitWindow, dpi);
     }
 
-    private static double DistanceSquaredToRectangle(int x, int y, DrawingRectangle rectangle)
+    private void SchedulePositionCorrection(bool fitWindow)
     {
-        var deltaX = x < rectangle.Left
-            ? (double)rectangle.Left - x
-            : x > rectangle.Right
-                ? (double)x - rectangle.Right
-                : 0;
-        var deltaY = y < rectangle.Top
-            ? (double)rectangle.Top - y
-            : y > rectangle.Bottom
-                ? (double)y - rectangle.Bottom
-                : 0;
+        if (_positionCorrectionPending) return;
+        _positionCorrectionPending = true;
+        _ = AssociatedObject.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            _positionCorrectionPending = false;
+            CorrectCurrentPosition(fitWindow);
+        }));
+    }
 
-        return deltaX * deltaX + deltaY * deltaY;
+    private void CorrectCurrentPosition(bool fitWindow)
+    {
+        if (_isApplyingPlacement || _window?.WindowState != WindowState.Normal
+            || _window.ResizeMode == ResizeMode.NoResize || !TryGetWindowBounds(out var bounds)) return;
+        var corrected = ConstrainBounds(bounds, fitWindow);
+        if (corrected == bounds) return;
+        _isApplyingPlacement = true;
+        try
+        {
+            WindowNativeMethods.SetWindowBounds(new WindowInteropHelper(_window).Handle,
+                corrected.Left, corrected.Top, corrected.Width, corrected.Height);
+            UpdateStoredPosition(_activeSmallWindowMode, corrected.Left, corrected.Top);
+        }
+        finally { _isApplyingPlacement = false; }
+    }
+
+    private nint WindowProc(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
+    {
+        if (_window?.ResizeMode == ResizeMode.NoResize || _window?.WindowState != WindowState.Normal) return 0;
+        if (message == 0x0216 && lParam != 0) // WM_MOVING: constrain the proposed rectangle before it is applied.
+        {
+            var rect = Marshal.PtrToStructure<WindowNativeMethods.NativeRect>(lParam);
+            var proposed = DrawingRectangle.FromLTRB(rect.Left, rect.Top, rect.Right, rect.Bottom);
+            var corrected = ConstrainBounds(proposed, fitWindow: false);
+            rect.Left = corrected.Left; rect.Top = corrected.Top;
+            rect.Right = corrected.Right; rect.Bottom = corrected.Bottom;
+            Marshal.StructureToPtr(rect, lParam, false);
+            handled = true;
+            return 1;
+        }
+        if (message is 0x007E or 0x02E0 or 0x0232) // Display change, DPI change, end move/resize.
+            SchedulePositionCorrection(fitWindow: message != 0x0232);
+        return 0;
     }
 }

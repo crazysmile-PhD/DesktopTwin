@@ -197,6 +197,11 @@
                                              ToolTip="{Binding WindowSizeModeMenuToolTip}" />
                                 <Separator />
                                 <ui:MenuItem Header="{loc:Loc Menu.Resolution}">
+                                    <ui:MenuItem Command="{Binding UseAutomaticResolutionCommand}"
+                                                 Header="{loc:Loc Menu.Resolution.Automatic}"
+                                                 IsCheckable="True"
+                                                 IsChecked="{Binding IsAutomaticResolution, Mode=OneWay}" />
+                                    <Separator />
                                     <ui:MenuItem Command="{Binding SelectResolutionCommand}"
                                                  CommandParameter="1920x1080"
                                                  Header="1920 × 1080"
@@ -227,6 +232,7 @@
                                 <ui:MenuItem Header="{loc:Loc Menu.Window}">
                                     <ui:MenuItem Command="{Binding UseAdaptiveCommand}"
                                                  Header="{loc:Loc Menu.Adaptive}"
+                                                 IsEnabled="{Binding IsFixedResolution}"
                                                  IsCheckable="True"
                                                  IsChecked="{Binding IsAdaptive, Mode=OneWay}" />
                                 </ui:MenuItem>
@@ -366,7 +372,7 @@
         </Popup>
 
         <!-- ===== 内容区：RDP 画面与连接引导 ===== -->
-        <Grid Grid.Row="1"
+        <Grid x:Name="DesktopArea" Grid.Row="1"
               Background="Black">
             <b:Interaction.Behaviors>
                 <behaviors:WindowResizeBehavior AspectRatio="{Binding DesktopAspectRatio}"

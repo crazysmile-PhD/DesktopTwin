@@ -1,4 +1,5 @@
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Forms.Integration;
@@ -6,6 +7,9 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using DesktopTwin.Interop;
 using DesktopTwin.View;
+using DesktopTwin.View.Behaviors;
+using DesktopTwin.Models;
+using Microsoft.Xaml.Behaviors;
 
 namespace DesktopTwin.Tests;
 
@@ -80,6 +84,7 @@ public sealed class DesktopViewportTests
     public void NativeRdpControlReceivesTheFittedRectangleWithoutConnecting() => RunOnSta(() =>
     {
         using var rdp = new RdpActiveXHost();
+        rdp.Size = new System.Drawing.Size(1920, 1080);
         using var host = new WindowsFormsHost { Child = rdp };
         var viewport = new DesktopViewport { Child = host };
         using var fixture = new WindowFixture(viewport);
@@ -104,6 +109,49 @@ public sealed class DesktopViewportTests
 
         host.Child = null;
     });
+
+    [Fact]
+    public void StartupRestoresSavedPositionFitsTheWorkAreaAndConstrainsDragging() => RunOnSta(() =>
+    {
+        var grid = new Grid();
+        var area = System.Windows.Forms.Screen.PrimaryScreen!.WorkingArea;
+        var savedTop = area.Top - 59;
+        var savedLeft = area.Left + Math.Min(300, area.Width / 4);
+        var behavior = new WindowResizeBehavior
+        {
+            TargetWidth = 1280, AspectRatio = 16d / 9d,
+            NormalWindowPosition = new WindowPosition(savedLeft, savedTop)
+        };
+        Interaction.GetBehaviors(grid).Add(behavior);
+        using var fixture = new WindowFixture(grid, ResizeMode.CanResize);
+        var handle = new WindowInteropHelper(fixture.Window).Handle;
+        Assert.True(WindowNativeMethods.TryGetWindowRect(handle, out var restored));
+        Assert.True(restored.Top >= area.Top);
+        Assert.True(restored.Left >= area.Left);
+        Assert.True(restored.Right <= area.Right + 1);
+        Assert.True(restored.Bottom <= area.Bottom + 1);
+        Assert.Equal(restored.Left, behavior.NormalWindowPosition!.Left);
+        Assert.Equal(restored.Top, behavior.NormalWindowPosition.Top);
+
+        var proposed = new WindowNativeMethods.NativeRect
+        {
+            Left = restored.Left, Top = area.Top - 200,
+            Right = restored.Right, Bottom = area.Top - 200 + restored.Bottom - restored.Top
+        };
+        var pointer = Marshal.AllocHGlobal(Marshal.SizeOf<WindowNativeMethods.NativeRect>());
+        try
+        {
+            Marshal.StructureToPtr(proposed, pointer, false);
+            Assert.Equal((nint)1, SendMessage(handle, 0x0216, 0, pointer));
+            var constrained = Marshal.PtrToStructure<WindowNativeMethods.NativeRect>(pointer);
+            Assert.Equal(area.Top, constrained.Top);
+            Assert.Equal(proposed.Bottom - proposed.Top, constrained.Bottom - constrained.Top);
+        }
+        finally { Marshal.FreeHGlobal(pointer); }
+    });
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern nint SendMessage(nint hwnd, int message, nint wParam, nint lParam);
 
     private static void AssertClose(double expected, double actual) =>
         Assert.InRange(Math.Abs(expected - actual), 0, 0.01);
@@ -135,12 +183,12 @@ public sealed class DesktopViewportTests
     {
         internal Window Window { get; }
 
-        internal WindowFixture(UIElement content)
+        internal WindowFixture(UIElement content, ResizeMode resizeMode = ResizeMode.NoResize)
         {
             Window = new Window
             {
                 Width = 640, Height = 420, Left = 20, Top = 20,
-                WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
+                WindowStyle = WindowStyle.None, ResizeMode = resizeMode,
                 ShowActivated = false, ShowInTaskbar = false, Opacity = 0, Content = content
             };
             Window.Show();

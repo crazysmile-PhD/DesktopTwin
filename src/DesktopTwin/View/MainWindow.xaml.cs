@@ -73,6 +73,10 @@ public partial class MainWindow : FluentWindow
     private bool _smartSizingBeforeFullscreen;
     private DispatcherTimer? _barAutoHideTimer;
     private DispatcherTimer? _cursorWatchTimer;
+    private DispatcherTimer? _displayResizeTimer;
+    private bool _displayResizeFailureNotified;
+    private DispatcherTimer? _displayConfirmationTimer;
+    private System.Drawing.Size? _pendingDisplaySize;
 
     /// <summary>
     /// 凭据框轮询间隔。取 400ms：比 AutoLoginService 的 600ms 略快，
@@ -134,6 +138,18 @@ public partial class MainWindow : FluentWindow
             InitializeComponent();
         using (new PerformanceTrace("RDP 宿主挂载"))
             RdpFormsHost.Child = RdpHost;
+        _displayResizeTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(300)
+        };
+        _displayResizeTimer.Tick += OnDisplayResizeTick;
+        _displayConfirmationTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(2)
+        };
+        _displayConfirmationTimer.Tick += OnDisplayConfirmationTick;
+        DesktopArea.SizeChanged += OnDesktopAreaSizeChanged;
+        RdpHost.LoginCompleted += OnDisplayLoginCompleted;
 
         // Topmost 由 XAML 里的 OneWay 绑定驱动（MainWindow.xaml:20），
         // ViewModel 构造时已用设置里的值初始化 IsTopmost。
@@ -209,6 +225,10 @@ public partial class MainWindow : FluentWindow
         _credentialDialogWatchTimer = null;
 
         _childSessionService.DesktopSizeChanged -= OnDesktopSizeChanged;
+        _displayResizeTimer?.Stop();
+        _displayConfirmationTimer?.Stop();
+        DesktopArea.SizeChanged -= OnDesktopAreaSizeChanged;
+        RdpHost.LoginCompleted -= OnDisplayLoginCompleted;
 
         RdpFormsHost.Child = null;
         RdpHost.Dispose();
@@ -242,6 +262,66 @@ public partial class MainWindow : FluentWindow
             _windowSource = HwndSource.FromHwnd(_windowHandle);
             _windowSource?.AddHook(OnWindowMessage);
         }
+        QueueDisplayResize();
+    }
+
+    /// <summary>窗口内容区转换为物理像素；窗口边框和标题栏不计入远端桌面。</summary>
+    internal RdpDisplaySettings GetWindowDisplaySettings()
+    {
+        var dpi = VisualTreeHelper.GetDpi(this);
+        return RdpDisplaySettings.FromViewport(
+            Math.Max(0, DesktopArea.ActualWidth - (_isFullscreen ? 0 : 6)),
+            Math.Max(0, DesktopArea.ActualHeight - (_isFullscreen ? 0 : 3)), dpi.DpiScaleX);
+    }
+
+    private void OnDesktopAreaSizeChanged(object sender, SizeChangedEventArgs e) => QueueDisplayResize();
+
+    private void OnDisplayLoginCompleted(object? sender, EventArgs e)
+    {
+        _displayResizeFailureNotified = false;
+        QueueDisplayResize();
+    }
+
+    private void QueueDisplayResize()
+    {
+        RdpHost.DesktopScaleFactor = GetWindowDisplaySettings().ScaleFactor;
+        if (_displayResizeTimer is null) return;
+        _displayResizeTimer.Stop();
+        if (_settings.Current.Session.AutomaticDesktopSize && IsVisible && WindowState != WindowState.Minimized)
+            _displayResizeTimer.Start();
+    }
+
+    private void OnDisplayResizeTick(object? sender, EventArgs e)
+    {
+        _displayResizeTimer?.Stop();
+        if (!_settings.Current.Session.AutomaticDesktopSize || !IsVisible || WindowState == WindowState.Minimized) return;
+        RdpHost.SetSmartSizing(true);
+        var settings = GetWindowDisplaySettings();
+        if (!RdpHost.UpdateDesktopDisplay(settings))
+        {
+            NotifyDisplayResizeFailure();
+            return;
+        }
+        if (RdpHost.ConnectedState != 1 || RdpHost.ReportedDesktopSize == settings.DesktopSize) return;
+        _pendingDisplaySize = settings.DesktopSize;
+        _displayConfirmationTimer?.Stop();
+        _displayConfirmationTimer?.Start();
+    }
+
+    private void OnDisplayConfirmationTick(object? sender, EventArgs e)
+    {
+        _displayConfirmationTimer?.Stop();
+        if (_settings.Current.Session.AutomaticDesktopSize && RdpHost.ConnectedState == 1
+            && _pendingDisplaySize is { } size && RdpHost.ReportedDesktopSize != size)
+            NotifyDisplayResizeFailure();
+        _pendingDisplaySize = null;
+    }
+
+    private void NotifyDisplayResizeFailure()
+    {
+        if (_displayResizeFailureNotified) return;
+        _displayResizeFailureNotified = true;
+        if (DataContext is MainWindowViewModel viewModel) viewModel.NotifyAutomaticResolutionUnavailable();
     }
 
     /// <summary>
@@ -599,6 +679,13 @@ public partial class MainWindow : FluentWindow
         }
 
         var session = _settings.Current.Session;
+        if (session.AutomaticDesktopSize)
+        {
+            RdpHost.SetSmartSizing(true);
+            RdpViewport.Margin = new Thickness(0);
+            QueueDisplayResize();
+            return;
+        }
         var desktopWidth = session.DesktopWidth;
         var desktopHeight = session.DesktopHeight;
 
@@ -645,7 +732,6 @@ public partial class MainWindow : FluentWindow
         ref bool handled)
     {
         const int WmDisplayChange = 0x007E;
-        const int WmExitSizeMove = 0x0232;
 
         if (message == WmDisplayChange && _isFullscreen)
         {
@@ -656,38 +742,7 @@ public partial class MainWindow : FluentWindow
                 DispatcherPriority.Background);
         }
 
-        // 拖动/缩放结束时校正一次位置：用户把窗口推到屏幕顶部以外时，标题栏会被挡住、
-        // 窗口再也抓不回来。放在 EXITSIZEMOVE 而不是 MOVE，避免和拖动过程抢位置。
-        if (message == WmExitSizeMove && !_isFullscreen)
-        {
-            EnsureTitleBarVisible();
-        }
-
         return IntPtr.Zero;
-    }
-
-    /// <summary>
-    /// 把窗口顶边压回所在显示器工作区的顶部，保证标题栏始终露得出来。
-    ///
-    /// 只处理「上边缘跑出屏幕」这一种：左右超出时系统会留一部分可见，用户还能拖回来；
-    /// 上边缘一旦越过工作区顶部，标题栏整条看不见，只能靠任务栏或 Alt+Space 找回来。
-    /// </summary>
-    private void EnsureTitleBarVisible()
-    {
-        var handle = new WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero)
-        {
-            return;
-        }
-
-        var screen = System.Windows.Forms.Screen.FromHandle(handle);
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var workAreaTop = screen.WorkingArea.Top / (dpi.DpiScaleY > 0 ? dpi.DpiScaleY : 1);
-
-        if (Top < workAreaTop)
-        {
-            Top = workAreaTop;
-        }
     }
 
     private void OnDisplaySettingsChanged()
@@ -707,6 +762,7 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void OnDesktopSizeChanged(object? sender, EventArgs e)
     {
+        QueueDisplayResize();
         if (!_isFullscreen)
         {
             return;

@@ -11,7 +11,7 @@ public sealed class AppSettings
     /// <summary>
     /// 当前设置文件的结构版本。新增需要迁移的默认值变更时递增。
     /// </summary>
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     /// <summary>
     /// 设置文件写入时的结构版本。旧文件里没有这一项，反序列化后为 0。
@@ -98,12 +98,12 @@ public sealed class SessionSettings
     public int DesktopHeight { get; set; } = 1080;
 
     /// <summary>
-    /// RDP 画面是否自适应窗口。关闭时按 1:1 像素显示。
-    ///
-    /// 默认关闭（1:1）：分身桌面通常是 1920×1080，而窗口大小取决于屏幕与用户拖动，
-    /// 自适应缩放会把画面重采样，文字发虚。1:1 是清晰的那一档，需要铺满时再手动切。
+    /// 固定分辨率时是否等比缩放完整画面。关闭时按 1:1 像素显示。
     /// </summary>
-    public bool SmartSizing { get; set; }
+    public bool SmartSizing { get; set; } = true;
+
+    /// <summary>默认按窗口可用区域调整远端桌面分辨率，避免将高分辨率桌面缩成缩略图。</summary>
+    public bool AutomaticDesktopSize { get; set; } = true;
 
     /// <summary>
     /// Alt+Tab、Windows 键等系统组合键是否发送到分身。切换需重连 RDP。

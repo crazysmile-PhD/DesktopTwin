@@ -24,7 +24,7 @@ namespace DesktopTwin.ViewModel;
 public partial class MainWindowViewModel : ObservableObject
 {
     private const double DefaultWindowWidth = 1280d;
-    private const double SmallWindowWidth = 500d;
+    private const double SmallWindowWidth = 750d;
 
     private readonly ChildSessionService _childSessionService;
     private readonly SettingsService _settings;
@@ -226,35 +226,35 @@ public partial class MainWindowViewModel : ObservableObject
     /// 当前分辨率是否为 1920 × 1080。
     /// </summary>
     public bool IsDefaultResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 1920
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 1920
         && _settings.Current.Session.DesktopHeight == 1080;
 
     /// <summary>
     /// 当前分辨率是否为 2560 × 1440。
     /// </summary>
     public bool IsQuadHdResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 2560
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 2560
         && _settings.Current.Session.DesktopHeight == 1440;
 
     /// <summary>
     /// 当前分辨率是否为 1600 × 900。
     /// </summary>
     public bool IsHdPlusResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 1600
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 1600
         && _settings.Current.Session.DesktopHeight == 900;
 
     /// <summary>
     /// 当前分辨率是否为 1280 × 720。
     /// </summary>
     public bool IsHdResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 1280
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 1280
         && _settings.Current.Session.DesktopHeight == 720;
 
     /// <summary>
     /// 当前分辨率不在预设列表里，也就是用户自定义的尺寸。
     /// </summary>
     public bool IsCustomResolutionSelected =>
-        !IsDefaultResolutionSelected
+        IsFixedResolution && !IsDefaultResolutionSelected
         && !IsQuadHdResolutionSelected
         && !IsHdPlusResolutionSelected
         && !IsHdResolutionSelected;
@@ -262,8 +262,15 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>
     /// 当前分辨率的显示文本，形如 <c>1920 × 1080</c>。
     /// </summary>
-    public string CurrentResolutionText =>
-        $"{_settings.Current.Session.DesktopWidth} × {_settings.Current.Session.DesktopHeight}";
+    public string CurrentResolutionText => IsAutomaticResolution
+        ? Locale.Get("Menu.Resolution.Automatic")
+        : $"{_settings.Current.Session.DesktopWidth} × {_settings.Current.Session.DesktopHeight}";
+
+    /// <summary>是否按窗口空间调整分身桌面。</summary>
+    public bool IsAutomaticResolution => _settings.Current.Session.AutomaticDesktopSize;
+
+    /// <summary>是否选用了固定分辨率。</summary>
+    public bool IsFixedResolution => !IsAutomaticResolution;
 
     /// <summary>
     /// 分身桌面的宽高比。画面布局与小窗尺寸都按设定分辨率计算。
@@ -272,9 +279,9 @@ public partial class MainWindowViewModel : ObservableObject
     {
         get
         {
-            var session = _settings.Current.Session;
-            return session.DesktopHeight > 0
-                ? (double)session.DesktopWidth / session.DesktopHeight
+            var size = _childSessionService.RenderedDesktopSize;
+            return size.Height > 0
+                ? (double)size.Width / size.Height
                 : 16d / 9d;
         }
     }
@@ -1033,6 +1040,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void NotifyResolutionChanged()
     {
+        OnPropertyChanged(nameof(IsAutomaticResolution));
+        OnPropertyChanged(nameof(IsFixedResolution));
         OnPropertyChanged(nameof(IsDefaultResolutionSelected));
         OnPropertyChanged(nameof(IsQuadHdResolutionSelected));
         OnPropertyChanged(nameof(IsHdPlusResolutionSelected));
@@ -1041,6 +1050,17 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(CurrentResolutionText));
         OnPropertyChanged(nameof(DesktopAspectRatio));
     }
+
+    [RelayCommand]
+    private void UseAutomaticResolution()
+    {
+        if (Execute(_childSessionService.UseAutomaticDesktopSize)) NotifyResolutionChanged();
+    }
+
+    /// <summary>原生控件拒绝联机尺寸更新时给出可操作的提示。</summary>
+    internal void NotifyAutomaticResolutionUnavailable() => ShowNotification(
+        Locale.Get("Notify.AutomaticResolution.Title"), Locale.Get("Notify.AutomaticResolution.Message"),
+        InfoBarSeverity.Warning, TimeSpan.FromSeconds(12));
 
     [RelayCommand]
     private void UseAdaptive()

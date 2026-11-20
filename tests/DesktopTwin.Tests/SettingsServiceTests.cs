@@ -26,8 +26,9 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(1920, settings.Session.DesktopWidth);
         Assert.Equal(1080, settings.Session.DesktopHeight);
 
-        // 显示比例默认 1:1（文字最清晰的一档）；自适应缩放需要用户主动选
-        Assert.False(settings.Session.SmartSizing);
+        Assert.True(settings.Session.SmartSizing);
+        Assert.True(settings.Session.AutomaticDesktopSize);
+        Assert.False(settings.Window.SmallWindowMode);
         Assert.False(settings.Session.RelativeMouseMode);
         Assert.True(settings.Launch.AutoLaunchOnConnect);
 
@@ -61,6 +62,34 @@ public sealed class SettingsServiceTests : IDisposable
         service.Flush();
         using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(service.SettingsPath));
         Assert.False(document.RootElement.GetProperty("Session").TryGetProperty("KeepAspectRatio", out _));
+    }
+
+    [Fact]
+    public void 升级时恢复可读的自动分辨率且不再自动进入旧小窗()
+    {
+        File.WriteAllText(Path.Combine(_directory, "settings.json"),
+            """{"SettingsVersion":1,"Session":{"SmartSizing":false},"Window":{"SmallWindowMode":true,"SmallPosition":{"Left":581,"Top":-59}}}""");
+        using var service = new SettingsService(_directory);
+        Assert.True(service.Current.Session.AutomaticDesktopSize);
+        Assert.True(service.Current.Session.SmartSizing);
+        Assert.False(service.Current.Window.SmallWindowMode);
+        Assert.Equal(2, service.Current.SettingsVersion);
+    }
+
+    [Fact]
+    public void 新版显式选择固定分辨率与小窗在下次启动仍被保留()
+    {
+        using (var service = new SettingsService(_directory))
+        {
+            service.Current.Session.AutomaticDesktopSize = false;
+            service.Current.Session.SmartSizing = false;
+            service.Current.Window.SmallWindowMode = true;
+            service.Flush();
+        }
+        using var reader = new SettingsService(_directory);
+        Assert.False(reader.Current.Session.AutomaticDesktopSize);
+        Assert.False(reader.Current.Session.SmartSizing);
+        Assert.True(reader.Current.Window.SmallWindowMode);
     }
 
     [Fact]

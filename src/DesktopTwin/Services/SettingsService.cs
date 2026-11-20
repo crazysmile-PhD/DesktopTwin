@@ -267,6 +267,14 @@ public sealed class SettingsService : IDisposable
             settings.Session.SmartSizing = false;
         }
 
+        // v2：以窗口可用空间和可读性为默认；清除旧版小窗启动状态。
+        if (settings.SettingsVersion < 2)
+        {
+            settings.Session.AutomaticDesktopSize = true;
+            settings.Session.SmartSizing = true;
+            settings.Window.SmallWindowMode = false;
+        }
+
         settings.SettingsVersion = AppSettings.CurrentVersion;
         return true;
     }
