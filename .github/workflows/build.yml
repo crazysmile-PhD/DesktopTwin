@@ -8,11 +8,24 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: 校验发行标签与程序版本
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content src/DesktopTwin/DesktopTwin.csproj -Raw
+          $expectedTag = "v$($project.Project.PropertyGroup.Version | Where-Object { $_ })"
+          if ($env:GITHUB_REF_NAME -cne $expectedTag) {
+            throw "标签 $env:GITHUB_REF_NAME 与程序版本 $expectedTag 不一致"
+          }
 
       - name: 安装 .NET SDK
         uses: actions/setup-dotnet@v4
@@ -126,15 +139,18 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
 
-          # 发布说明优先用仓库里手写的 build/release-notes/<tag>.md。
-          # 自动生成的说明是一串 PR 标题，和 0.2.5 / 0.2.6 那种「更新内容 / 下载哪个文件 /
-          # 校验值 / 从上一版升级」的结构对不上；没有对应文件时才退回自动生成。
+          # gh 将附件上传到草稿后才公开发行，避免留下可见但缺少附件的发行。
+          # 优先使用仓库中的手写发行说明；没有对应文件时才生成说明。
           $notesFile = "build/release-notes/${{ github.ref_name }}.md"
-          if (Test-Path $notesFile) {
-            gh release create "${{ github.ref_name }}" --title "v$version" --notes-file $notesFile --verify-tag
-          } else {
-            gh release create "${{ github.ref_name }}" --title "v$version" --generate-notes --verify-tag
+          $files = @(Get-ChildItem "stage" -File | Select-Object -ExpandProperty FullName)
+          if ($files.Count -ne 3) {
+            throw "发行应包含两个程序和 README，实际发现 $($files.Count) 个文件"
           }
-
-          $files = Get-ChildItem "stage" | Select-Object -ExpandProperty FullName
-          gh release upload "${{ github.ref_name }}" $files --clobber
+          if (Test-Path $notesFile) {
+            gh release create "${{ github.ref_name }}" @files --repo "$env:GITHUB_REPOSITORY" --title "v$version" --notes-file $notesFile --verify-tag --latest
+          } else {
+            gh release create "${{ github.ref_name }}" @files --repo "$env:GITHUB_REPOSITORY" --title "v$version" --generate-notes --verify-tag --latest
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release 发布失败，退出码 $LASTEXITCODE"
+          }
