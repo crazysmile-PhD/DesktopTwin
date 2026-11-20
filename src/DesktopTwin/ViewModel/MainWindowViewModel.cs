@@ -96,6 +96,9 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _sendSystemShortcutsToRemote = true;
 
     [ObservableProperty]
+    private bool _isRelativeMouseModeEnabled;
+
+    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(WatchModeButtonText))]
     [NotifyPropertyChangedFor(nameof(WatchModeButtonToolTip))]
     private bool _isWatchModeEnabled;
@@ -162,6 +165,7 @@ public partial class MainWindowViewModel : ObservableObject
         _smallWindowPosition = childSessionService.SmallWindowPosition;
         _sendSystemShortcutsToRemote = childSessionService.SendSystemShortcutsToRemote;
         _isAudioMuted = childSessionService.AudioMuted;
+        _isRelativeMouseModeEnabled = childSessionService.RelativeMouseModeEnabled;
         _isWatchModeEnabled = childSessionService.WatchModeEnabled;
         _autoLaunchOnConnect = settings.Current.Launch.AutoLaunchOnConnect;
         _runAsAdministrator = settings.Current.Launch.RunAsAdministrator;
@@ -192,6 +196,7 @@ public partial class MainWindowViewModel : ObservableObject
         _childSessionService.ConnectionFailed += OnChildSessionConnectionFailed;
         _childSessionService.SystemShortcutsReconnectCompleted += OnSystemShortcutsReconnectCompleted;
         _childSessionService.AudioReconnectCompleted += OnAudioReconnectCompleted;
+        _childSessionService.RelativeMouseModeConfigured += OnRelativeMouseModeConfigured;
         _childSessionService.AutoLaunchSkipped += OnAutoLaunchSkipped;
         _childSessionService.DesktopSizeChanged += OnDesktopSizeChanged;
         UpdateConnectionStatus();
@@ -713,6 +718,7 @@ public partial class MainWindowViewModel : ObservableObject
     internal void Detach()
     {
         _childSessionService.DesktopSizeChanged -= OnDesktopSizeChanged;
+        _childSessionService.RelativeMouseModeConfigured -= OnRelativeMouseModeConfigured;
         _globalHotkey?.Dispose();
         _globalHotkey = null;
         _sessionAgent.SwitchRequested -= OnSessionAgentSwitchRequested;
@@ -1442,6 +1448,31 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void ToggleRelativeMouseMode()
+    {
+        try
+        {
+            var reconnectStarted = _childSessionService.SetRelativeMouseMode(!IsRelativeMouseModeEnabled);
+            UpdateConnectionStatus();
+            ShowNotification(
+                reconnectStarted ? Locale.Get("Notify.SettingsApplying") : Locale.Get("Notify.SettingsSaved"),
+                reconnectStarted
+                    ? Locale.Get("Notify.RelativeMouse.Applying")
+                    : Locale.Get("Notify.RelativeMouse.NextConnect"),
+                InfoBarSeverity.Informational);
+        }
+        catch (Exception exception)
+        {
+            UpdateConnectionStatus();
+            ShowNotification(
+                Locale.Get("Notify.SettingsSwitchFailed.Title"),
+                exception.GetBaseException().Message,
+                InfoBarSeverity.Error,
+                TimeSpan.FromSeconds(8));
+        }
+    }
+
+    [RelayCommand]
     private void ToggleWatchMode()
     {
         var enabled = !IsWatchModeEnabled;
@@ -1824,6 +1855,32 @@ public partial class MainWindowViewModel : ObservableObject
             }));
     }
 
+    private void OnRelativeMouseModeConfigured(object? sender, EventArgs e)
+    {
+        // 捕获本次连接的结果，不能把延迟通知写成随后排队设置的成功提示。
+        var enabled = _childSessionService.RelativeMouseModeConfiguredEnabled;
+        var accepted = _childSessionService.RelativeMouseModeSettingsAccepted;
+        _ = Application.Current.Dispatcher.BeginInvoke(
+            DispatcherPriority.Normal,
+            new Action(() =>
+            {
+                if (_childSessionService.ConnectedState != 1
+                    || _childSessionService.RelativeMouseModeEnabled != enabled)
+                {
+                    return;
+                }
+
+                UpdateConnectionStatus();
+                ShowNotification(
+                    Locale.Get("Menu.RelativeMouseMode"),
+                    !accepted ? Locale.Get("Notify.RelativeMouse.Unavailable")
+                        : enabled ? Locale.Get("Notify.RelativeMouse.Requested")
+                        : Locale.Get("Notify.RelativeMouse.Disabled"),
+                    accepted ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
+                    TimeSpan.FromSeconds(8));
+            }));
+    }
+
     private void ShowNotification(
         string title,
         string message,
@@ -1863,6 +1920,7 @@ public partial class MainWindowViewModel : ObservableObject
         SendSystemShortcutsToRemote = _childSessionService.SendSystemShortcutsToRemote;
         IsWatchModeEnabled = _childSessionService.WatchModeEnabled;
         IsAudioMuted = _childSessionService.AudioMuted;
+        IsRelativeMouseModeEnabled = _childSessionService.RelativeMouseModeEnabled;
         IsRdpConnected = connectedState == 1;
         IsConnectionPromptVisible = IsSessionClosing || (connectedState == 0 && !_startRequested);
 
