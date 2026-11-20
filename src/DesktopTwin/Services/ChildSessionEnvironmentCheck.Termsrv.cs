@@ -41,6 +41,9 @@ public static partial class ChildSessionEnvironmentCheck
 
     private static readonly object TermsrvGate = new();
 
+    /// <summary>后台完整性校验发布结果，诊断窗口据此刷新快照。</summary>
+    internal static event EventHandler? TermsrvVerificationCompleted;
+
     /// <summary>
     /// sfc 同一时刻只跑一个进程（校验 /verifyfile 与修复 /scanfile 共用）。
     ///
@@ -139,6 +142,7 @@ public static partial class ChildSessionEnvironmentCheck
                         _termsrvStateAt = DateTime.UtcNow;
                         _termsrvVerifyRunning = false;
                     }
+                    TermsrvVerificationCompleted?.Invoke(null, EventArgs.Empty);
                 });
             }
 

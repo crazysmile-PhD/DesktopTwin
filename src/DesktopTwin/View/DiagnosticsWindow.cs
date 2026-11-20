@@ -24,8 +24,7 @@ namespace DesktopTwin.View;
 /// 三档：警告（会挡住启动）/ 提示（不影响启动）/ 已解决（曾经出现、现在没了）。
 /// 可自动修复的问题右侧有「修复」按钮；点整行展开完整说明与手动步骤。
 ///
-/// 非模态，且刷新靠定时轮询而不是事件——用户可能去系统设置里改了东西再回来，
-/// 轮询能自动把状态追平，不需要他手动点刷新。
+    /// 非模态；打开、重新激活、手动重检与完整性校验完成时后台刷新。
 /// </summary>
 internal sealed class DiagnosticsWindow : FluentWindow
 {
@@ -53,7 +52,8 @@ internal sealed class DiagnosticsWindow : FluentWindow
     /// <summary>「启动失败」横幅：说明这次是被启动失败带进来的。</summary>
     private readonly StackPanel _startupBanner;
     private readonly TextBlock _statusText;
-    private readonly DispatcherTimer _refreshTimer;
+    private readonly AsyncSnapshotRefresh<DiagnosticSnapshot> _refresh;
+    private bool _invalidateScan;
 
     /// <summary>出现过的所有问题标识，用于判断「曾经有问题、现在没了」。</summary>
     private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
@@ -141,14 +141,12 @@ internal sealed class DiagnosticsWindow : FluentWindow
 
         Content = BuildLayout();
 
-        _refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromSeconds(2)
-        };
-        _refreshTimer.Tick += (_, _) => Refresh();
-        _refreshTimer.Start();
-
+        _refresh = new AsyncSnapshotRefresh<DiagnosticSnapshot>(CollectSnapshotAsync,
+            ApplySnapshot, exception =>
+                _statusText.Text = Locale.Format("Diag.Status.CheckFailed", exception.GetBaseException().Message));
+        ChildSessionEnvironmentCheck.TermsrvVerificationCompleted += OnVerificationCompleted;
         Loaded += (_, _) => Refresh();
+        Activated += (_, _) => Refresh();
 
         // Esc 关闭：这是个非模态面板，用户随手按 Esc 走人才符合直觉。
         PreviewKeyDown += (_, e) =>
@@ -163,7 +161,8 @@ internal sealed class DiagnosticsWindow : FluentWindow
         Closed += (_, _) =>
         {
             _closed = true;
-            _refreshTimer.Stop();
+            _refresh.Dispose();
+            ChildSessionEnvironmentCheck.TermsrvVerificationCompleted -= OnVerificationCompleted;
         };
     }
 
@@ -297,7 +296,7 @@ internal sealed class DiagnosticsWindow : FluentWindow
         // 用户在别处修好的文件仍显示旧警告，还带一个点了也修不动的「修复」按钮。
         refreshButton.Click += (_, _) =>
         {
-            ChildSessionEnvironmentCheck.InvalidateScanCache();
+            _invalidateScan = true;
             Refresh();
         };
 
@@ -345,24 +344,41 @@ internal sealed class DiagnosticsWindow : FluentWindow
     /// </summary>
     private void Refresh()
     {
-        if (_closed)
-        {
-            return;
-        }
+        if (!_closed && !_fixInProgress) _ = _refresh.RequestAsync();
+    }
 
-        IReadOnlyList<ChildSessionEnvironmentCheck.Issue> issues;
-        try
+    private Task<DiagnosticSnapshot> CollectSnapshotAsync()
+    {
+        var credentialHint = _credentialHint;
+        var invalidate = _invalidateScan;
+        _invalidateScan = false;
+        return Task.Run(() =>
         {
-            issues = _showAll
-                ? ChildSessionEnvironmentCheck.CollectAll(_credentialHint)
-                : ChildSessionEnvironmentCheck.Collect(_credentialHint);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException
-                                              or System.ComponentModel.Win32Exception)
-        {
-            _statusText.Text = Locale.Format("Diag.Status.CheckFailed", exception.GetBaseException().Message);
-            return;
-        }
+            if (invalidate) ChildSessionEnvironmentCheck.InvalidateScanCache();
+            var issues = _showAll
+                ? ChildSessionEnvironmentCheck.CollectAll(credentialHint)
+                : ChildSessionEnvironmentCheck.Collect(credentialHint);
+            var state = ChildSessionEnvironmentCheck.GetTermsrvState();
+            return new DiagnosticSnapshot(issues,
+                ChildSessionEnvironmentCheck.IsTermsrvVerifying,
+                state.Exists && state.Verified && state.Intact);
+        });
+    }
+
+    private void OnVerificationCompleted(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.HasShutdownStarted)
+            _ = Dispatcher.BeginInvoke(new Action(Refresh));
+    }
+
+    private sealed record DiagnosticSnapshot(
+        IReadOnlyList<ChildSessionEnvironmentCheck.Issue> Issues,
+        bool TermsrvPending, bool TermsrvConclusive);
+
+    private void ApplySnapshot(DiagnosticSnapshot snapshot)
+    {
+        if (_closed || _fixInProgress) return;
+        var issues = snapshot.Issues;
 
         var currentIds = new HashSet<string>(StringComparer.Ordinal);
 
@@ -387,9 +403,8 @@ internal sealed class DiagnosticsWindow : FluentWindow
 
         // 校验还没出结论时，termsrv 那一条会暂时不出现：这时不能把它记成「已解决」，
         // 否则界面会先打勾、几秒后又变回问题。
-        var termsrvPending = ChildSessionEnvironmentCheck.IsTermsrvVerifying;
-        var termsrvState = ChildSessionEnvironmentCheck.GetTermsrvState();
-        var termsrvConclusive = termsrvState.Exists && termsrvState.Verified && termsrvState.Intact;
+        var termsrvPending = snapshot.TermsrvPending;
+        var termsrvConclusive = snapshot.TermsrvConclusive;
         foreach (var id in _seen)
         {
             if (currentIds.Contains(id))

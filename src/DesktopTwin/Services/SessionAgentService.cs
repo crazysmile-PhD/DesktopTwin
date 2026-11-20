@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Threading;
 using DesktopTwin.Interop;
 using DesktopTwin.Localization;
@@ -92,6 +93,9 @@ internal sealed class SessionAgentService : IDisposable
     private long _lastAgentProbeTicks = -100_000;
     private bool _lastAgentProbeResult;
     private bool _disposed;
+    private bool _startInProgress;
+    private CancellationTokenSource? _startCancellation;
+    private int _configurationGeneration;
 
     public SessionAgentService(Dispatcher dispatcher, string? dataDirectory = null)
     {
@@ -106,6 +110,9 @@ internal sealed class SessionAgentService : IDisposable
     /// 分身端请求切换。总在 UI 线程触发。
     /// </summary>
     public event EventHandler? SwitchRequested;
+
+    /// <summary>低频健康检查；不依赖“状态发生变化”的通知。</summary>
+    internal event EventHandler? HealthCheckRequested;
 
     /// <summary>
     /// 分身端 exe 的落地路径。
@@ -132,6 +139,11 @@ internal sealed class SessionAgentService : IDisposable
         error = string.Empty;
         ThrowIfDisposed();
 
+        if (_hotkeyArgument != hotkey)
+        {
+            _configurationGeneration++;
+            _startCancellation?.Cancel();
+        }
         _hotkeyArgument = hotkey;
 
         string? updateError = null;
@@ -194,9 +206,10 @@ internal sealed class SessionAgentService : IDisposable
     /// 不会弹 UAC。
     /// </summary>
     /// <returns>是否已下发启动任务。</returns>
-    public bool TryStartInChildSession()
+    public async Task<bool> TryStartInChildSessionAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        if (_startInProgress || cancellationToken.IsCancellationRequested) return false;
 
         var sessionId = ChildSessionNativeMethods.TryGetChildSessionId();
         if (sessionId is null)
@@ -229,11 +242,30 @@ internal sealed class SessionAgentService : IDisposable
             return false;
         }
 
-        var ok = ChildSessionProcessLauncher.RunInSession(
-            sessionId.Value,
-            AgentPath,
-            $"--hotkey \"{_hotkeyArgument}\"",
-            taskNamePrefix: "DesktopTwin-SessionAgent-");
+        _startInProgress = true;
+        using var startCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _startCancellation = startCancellation;
+        var startToken = startCancellation.Token;
+        var configuration = _configurationGeneration;
+        var arguments = $"--hotkey \"{_hotkeyArgument}\"";
+        bool ok;
+        try
+        {
+            ok = await Task.Run(() => ChildSessionProcessLauncher.RunInSession(
+                sessionId.Value, AgentPath, arguments,
+                taskNamePrefix: "DesktopTwin-SessionAgent-", cancellationToken: startToken));
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        finally
+        {
+            _startInProgress = false;
+            _startCancellation = null;
+        }
+        if (_disposed || configuration != _configurationGeneration
+            || cancellationToken.IsCancellationRequested) return false;
 
         AppLog.Info(ok
             ? Locale.Format("Agent.Started", sessionId)
@@ -402,6 +434,8 @@ internal sealed class SessionAgentService : IDisposable
     /// </summary>
     public void Uninstall()
     {
+        _configurationGeneration++;
+        _startCancellation?.Cancel();
         StopPolling();
 
         try
@@ -431,6 +465,7 @@ internal sealed class SessionAgentService : IDisposable
         }
 
         _disposed = true;
+        _startCancellation?.Cancel();
         StopPolling();
     }
 
@@ -465,7 +500,9 @@ internal sealed class SessionAgentService : IDisposable
 
     private void OnPollTick(object? sender, EventArgs e)
     {
-        if (_disposed || !File.Exists(RequestPath))
+        if (_disposed) return;
+        HealthCheckRequested?.Invoke(this, EventArgs.Empty);
+        if (!File.Exists(RequestPath))
         {
             return;
         }

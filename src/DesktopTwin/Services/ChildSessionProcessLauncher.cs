@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Threading;
 using System.Threading.Tasks;
 using DesktopTwin.Interop;
 using Microsoft.Win32;
@@ -83,11 +84,13 @@ public static class ChildSessionProcessLauncher
     /// <param name="executablePath">目标程序完整路径。</param>
     /// <param name="arguments">命令行参数。</param>
     /// <param name="runAsAdministrator">是否以管理员权限运行。</param>
+    /// <param name="cancellationToken">注销时取消尚未下发的启动；不承诺中止在途 COM 调用。</param>
     public static Task LaunchAsync(
         uint childSessionId,
         string executablePath,
         string arguments,
-        bool runAsAdministrator)
+        bool runAsAdministrator,
+        CancellationToken cancellationToken = default)
     {
         var fullPath = ValidateExecutablePath(executablePath);
         var workingDirectory = Path.GetDirectoryName(fullPath) ?? AppContext.BaseDirectory;
@@ -96,7 +99,7 @@ public static class ChildSessionProcessLauncher
             fullPath,
             arguments ?? string.Empty,
             workingDirectory,
-            runAsAdministrator));
+            runAsAdministrator, cancellationToken: cancellationToken), cancellationToken);
     }
 
     /// <summary>
@@ -417,7 +420,8 @@ public static class ChildSessionProcessLauncher
         uint sessionId,
         string executablePath,
         string arguments,
-        string taskNamePrefix)
+        string taskNamePrefix,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -427,7 +431,8 @@ public static class ChildSessionProcessLauncher
                 arguments,
                 Path.GetDirectoryName(executablePath) ?? string.Empty,
                 runAsAdministrator: false,
-                taskNamePrefix: taskNamePrefix);
+                taskNamePrefix: taskNamePrefix,
+                cancellationToken: cancellationToken);
             return true;
         }
         catch (Exception exception) when (exception is InvalidOperationException
@@ -447,8 +452,10 @@ public static class ChildSessionProcessLauncher
         string arguments,
         string workingDirectory,
         bool runAsAdministrator,
-        string? taskNamePrefix = null)
+        string? taskNamePrefix = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         // 会话可能在用户点击后被重建，启动前必须确认目标会话号仍然有效，
         // 否则会把程序启动到一个已经注销的会话里（表现为「点了没反应」）。
         var actualChildSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
@@ -515,6 +522,7 @@ public static class ChildSessionProcessLauncher
             action.Arguments = arguments;
             action.WorkingDirectory = workingDirectory;
 
+            cancellationToken.ThrowIfCancellationRequested();
             registeredTaskObject = rootFolder.RegisterTaskDefinition(
                 taskName,
                 taskDefinition,
@@ -526,6 +534,9 @@ public static class ChildSessionProcessLauncher
             taskRegistered = true;
 
             dynamic registeredTask = registeredTaskObject;
+            cancellationToken.ThrowIfCancellationRequested();
+            if (ChildSessionNativeMethods.TryGetChildSessionId() != childSessionId)
+                throw new InvalidOperationException("启动期间目标会话已改变，放弃执行。");
             runningTaskObject = registeredTask.RunEx(
                 null,
                 TaskRunUseSessionId,
