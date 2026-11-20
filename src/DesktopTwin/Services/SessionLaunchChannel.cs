@@ -52,7 +52,7 @@ internal sealed class SessionLaunchChannel : IDisposable
     }
 
     internal async Task LaunchAndConfirmAsync(string path, string arguments, string directory,
-        bool agent, CancellationToken cancellationToken,
+        CancellationToken cancellationToken,
         int observationMilliseconds = SessionLaunchProtocol.ObservationMilliseconds)
     {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -66,7 +66,7 @@ internal sealed class SessionLaunchChannel : IDisposable
                 using var writer = new BinaryWriter(_pipe, Encoding.UTF8, leaveOpen: true);
                 using var reader = new BinaryReader(_pipe, Encoding.UTF8, leaveOpen: true);
                 SessionLaunchProtocol.WriteRequest(writer, path, arguments, directory, checked((int)_sessionId),
-                    agent, observationMilliseconds);
+                    observationMilliseconds);
                 if (reader.ReadInt32() != SessionLaunchProtocol.Version)
                     throw new IOException("启动代理协议版本不匹配。");
                 var ready = reader.ReadBoolean();
@@ -80,10 +80,10 @@ internal sealed class SessionLaunchChannel : IDisposable
                 if (target.HasExited || session != _sessionId || target.SessionId != session
                     || target.StartTime.ToUniversalTime().Ticks != started
                     || !string.Equals(target.MainModule?.FileName, path, StringComparison.OrdinalIgnoreCase)
-                    || (!agent && window == 0))
+                    || window == 0)
                     throw new InvalidOperationException("启动回执与实际目标进程不匹配，未确认启动成功。");
                 AppLog.Info($"已确认会话 {session} 中的 {path} 就绪，PID {pid}，"
-                    + (agent ? "热键及消息循环已就绪。" : $"可响应窗口 0x{window:X}。"));
+                    + $"可响应窗口 0x{window:X}。");
             }, budget.Token).ConfigureAwait(false);
         }
         catch (Exception) when (budget.IsCancellationRequested)
@@ -95,7 +95,7 @@ internal sealed class SessionLaunchChannel : IDisposable
 
     internal static string EnsureWorkerInstalled(string? baseDirectory = null)
     {
-        using var stream = typeof(SessionAgentService).Assembly.GetManifestResourceStream("DesktopTwin.Agent.exe")
+        using var stream = typeof(SessionLaunchChannel).Assembly.GetManifestResourceStream("DesktopTwin.LaunchWorker.exe")
             ?? throw new InvalidOperationException("缺少内嵌启动代理。");
         using var memory = new MemoryStream();
         stream.CopyTo(memory);

@@ -29,15 +29,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly ChildSessionService _childSessionService;
     private readonly SettingsService _settings;
     private readonly DispatcherTimer _notificationTimer;
-    private readonly UuViewSwitchService _uuViewSwitchService;
-    private readonly UuViewLockService _uuViewLockService;
-    private readonly SessionAgentService _sessionAgent;
-    private long _lastAgentStartTicks;
-    private GlobalHotkeyService? _globalHotkey;
-    private Window? _hotkeyWindow;
     private DiagnosticsWindow? _diagnosticsWindow;
     private bool _startRequested;
-    private bool _uuSwitchInProgress;
 
     [ObservableProperty]
     private Brush _connectionStatusBrush = Brushes.Red;
@@ -137,13 +130,6 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _isAudioReconnectPending;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(UuViewSwitchMenuHeader))]
-    private bool _uuViewSwitchEnabled;
-
-    [ObservableProperty]
-    private bool _uuViewLockEnabled;
-
-    [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(AutoLoginMenuHeader))]
     private bool _autoLoginEnabled;
 
@@ -173,19 +159,8 @@ public partial class MainWindowViewModel : ObservableObject
         _targetProgramText = BuildTargetProgramText(settings.Current.Launch.TargetPath);
         _isSmallWindowMode = settings.Current.Window.SmallWindowMode;
 
-        _uuViewSwitchService = new UuViewSwitchService(childSessionService);
-        _uuViewLockService = new UuViewLockService(_uuViewSwitchService, Dispatcher.CurrentDispatcher);
-        _uuViewLockService.MonitoringFailed += OnUuViewLockMonitoringFailed;
-        _uuViewSwitchEnabled = settings.Current.Automation.UuViewSwitchEnabled;
-        _uuViewLockEnabled = settings.Current.Automation.UuViewLockEnabled;
         _autoLoginEnabled = settings.Current.Automation.AutoLoginEnabled;
         _hasAutoLoginPassword = childSessionService.AutoLogin?.HasStoredPassword == true;
-
-        // 分身内的热键代理：Console 侧的热键在焦点进分身画面后会失效，
-        // 必须由分身会话里的这个代理接住，再回头通知主端执行切换。
-        _sessionAgent = new SessionAgentService(Dispatcher.CurrentDispatcher);
-        _sessionAgent.SwitchRequested += OnSessionAgentSwitchRequested;
-        _sessionAgent.HealthCheckRequested += OnAgentHealthCheckRequested;
 
         _notificationTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -683,245 +658,17 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// UU 视角切换菜单文本。
-    /// </summary>
-    public string UuViewSwitchMenuHeader => UuViewSwitchEnabled
-        ? Locale.Format("Menu.UuSwitch.Enabled", UuHotkeyText)
-        : Locale.Get("Menu.UuSwitch.Disabled");
-
-    /// <summary>
     /// 自动登录菜单文本。
     /// </summary>
     public string AutoLoginMenuHeader => AutoLoginEnabled
         ? Locale.Get("Menu.AutoLogin.Enabled")
         : Locale.Get("Menu.AutoLogin.Disabled");
 
-    /// <summary>
-    /// 当前 UU 切换热键的可读文本。
-    /// </summary>
-    public string UuHotkeyText =>
-        GlobalHotkeyService.Format(_settings.Current.Automation.UuViewSwitchHotkey);
-
-    /// <summary>
-    /// 把窗口交给 ViewModel，用于注册全局热键。窗口创建后调用一次。
-    /// </summary>
-    /// <param name="window">主窗口。</param>
-    internal void AttachWindow(Window window)
-    {
-        using var timing = new PerformanceTrace("热键与代理初始化");
-        _hotkeyWindow = window;
-        ApplyUuHotkey(notifySuccess: false);
-    }
-
-    /// <summary>
-    /// 窗口关闭时释放热键与后台服务。
-    /// </summary>
+    /// <summary>窗口关闭时释放服务事件订阅。</summary>
     internal void Detach()
     {
         _childSessionService.DesktopSizeChanged -= OnDesktopSizeChanged;
         _childSessionService.RelativeMouseModeConfigured -= OnRelativeMouseModeConfigured;
-        _globalHotkey?.Dispose();
-        _globalHotkey = null;
-        _sessionAgent.SwitchRequested -= OnSessionAgentSwitchRequested;
-        _sessionAgent.HealthCheckRequested -= OnAgentHealthCheckRequested;
-        _sessionAgent.Dispose();
-        _uuViewLockService.MonitoringFailed -= OnUuViewLockMonitoringFailed;
-        _uuViewLockService.Dispose();
-        _uuViewSwitchService.Dispose();
-    }
-
-    /// <summary>
-    /// 重启 UU 的串流服务。
-    ///
-    /// 用于「快速连续切换之后，手机上的 UU 显示设备离线」的情况：
-    /// 切换要靠结束串流端来实现，短时间内连续结束会被 UU 服务当成连续崩溃而进入
-    /// 重启退避，之后它不再拉起串流端。重启服务可以清掉这个状态。
-    /// </summary>
-    [RelayCommand]
-    private async Task RepairUuStreamingAsync()
-    {
-        if (_uuSwitchInProgress)
-        {
-            return;
-        }
-
-        _uuSwitchInProgress = true;
-        _uuViewLockService.SetManualOperationActive(true);
-        try
-        {
-            ShowNotification(
-                Locale.Get("Uu.Repair.Title"),
-                Locale.Get("Uu.Repair.Message"),
-                InfoBarSeverity.Informational,
-                TimeSpan.FromSeconds(30));
-
-            var result = await _uuViewSwitchService.RestartStreamerServiceAsync(CancellationToken.None);
-            AppLog.Info($"UU 串流修复：{(result.Success ? "成功" : "失败")} —— {result.Message}");
-            ShowNotification(
-                result.Success
-                    ? Locale.Get("Uu.Repair.Done")
-                    : Locale.Get("Uu.Repair.Failed"),
-                result.Message,
-                result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-                TimeSpan.FromSeconds(10));
-        }
-        finally
-        {
-            _uuSwitchInProgress = false;
-            _uuViewLockService.SetManualOperationActive(false);
-        }
-    }
-
-    /// <summary>
-    /// 立即执行一次视角切换。菜单项和热键走同一条路径。
-    /// </summary>
-    [RelayCommand]
-    private async Task TriggerUuViewSwitchAsync()
-    {
-        if (!UuViewSwitchEnabled || _uuSwitchInProgress)
-        {
-            return;
-        }
-
-        _uuSwitchInProgress = true;
-        _uuViewLockService.SetManualOperationActive(true);
-        try
-        {
-            // 「正在切换」要贯穿整个切换过程（断开、杀串流端、等 UU 重新挑会话，
-            // 可能长达 30 秒）。之前只显示 3 秒，窗口还原进全屏时提示早就没了，
-            // 用户看到的是「无任何提示直接进全屏」。
-            ShowNotification(
-                Locale.Get("Uu.Switching.Title"),
-                Locale.Get("Uu.Switching.Message"),
-                InfoBarSeverity.Informational,
-                TimeSpan.FromSeconds(35));
-
-            var result = await _uuViewSwitchService.ToggleAsync(CancellationToken.None);
-
-            // 结果必须落日志：这次实测里切换的成败只出现在界面上，
-            // 排障时只能从「有没有杀串流端」间接猜，代价太高。
-            AppLog.Info(
-                $"视角切换结束：{(result.Success ? "成功" : "失败")} —— {result.Message}");
-
-            if (result.Success)
-            {
-                // 用户主动切换：新的落点就是「正确位置」，不更新的话下一轮锁定会把它纠正回去。
-                _uuViewLockService.RebaseTo(result.Target);
-            }
-
-            ShowNotification(
-                result.Success
-                    ? Locale.Get("Uu.Done.Title")
-                    : Locale.Get("Uu.Failed.Title"),
-                result.Message,
-                result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Warning,
-                TimeSpan.FromSeconds(8));
-
-            // 切到「整台电脑」的收尾会把窗口最小化（分身挂后台），
-            // InfoBar 在最小化的窗口里根本看不见——托盘气泡是唯一的可见通道。
-            // 切回分身时窗口会还原，InfoBar 可见，气泡只是顺手多一层保险。
-            if (!_childSessionService.IsDesktopVisible)
-            {
-                App.ShowTrayBalloon(
-                    result.Success
-                        ? Locale.Get("Uu.Done.Title")
-                        : Locale.Get("Uu.Failed.Title"),
-                    result.Message);
-            }
-        }
-        finally
-        {
-            _uuSwitchInProgress = false;
-            _uuViewLockService.SetManualOperationActive(false);
-        }
-    }
-
-    /// <summary>
-    /// 启用 / 关闭 UU 视角锁定。
-    ///
-    /// 只开锁定时不注册热键、不安装分身内代理——那种用法只在主机上操作，
-    /// 记录值固定为电脑主机。
-    /// </summary>
-    [RelayCommand]
-    private void ToggleUuViewLock()
-    {
-        UuViewLockEnabled = !UuViewLockEnabled;
-        _settings.Current.Automation.UuViewLockEnabled = UuViewLockEnabled;
-        _settings.SaveSoon();
-        ApplyUuViewLock();
-    }
-
-    private void ApplyUuViewLock()
-    {
-        try
-        {
-            _uuViewLockService.SetEnabled(UuViewLockEnabled, UuViewSwitchEnabled);
-        }
-        catch (Exception exception)
-        {
-            OnUuViewLockMonitoringFailed(this, exception);
-        }
-    }
-
-    private void OnUuViewLockMonitoringFailed(object? sender, Exception exception)
-    {
-        AppLog.Warn("UU 视角锁定停止：监听或纠正失败。", exception);
-        UuViewLockEnabled = false;
-        _settings.Current.Automation.UuViewLockEnabled = false;
-        _settings.SaveSoon();
-        ShowNotification(Locale.Get("Notify.UuLockFailed.Title"),
-            Locale.Get("Notify.UuLockFailed.Message"), InfoBarSeverity.Warning);
-    }
-
-    /// <summary>
-    /// 启用 / 关闭 UU 视角切换热键。
-    /// </summary>
-    [RelayCommand]
-    private void ToggleUuViewSwitch()
-    {
-        UuViewSwitchEnabled = !UuViewSwitchEnabled;
-        _settings.Current.Automation.UuViewSwitchEnabled = UuViewSwitchEnabled;
-        _settings.SaveSoon();
-
-        // 锁定基线依赖「视角切换」是否开启：两个都开时记录当前会话，只开锁定时固定主机。
-        ApplyUuViewLock();
-
-        if (UuViewSwitchEnabled)
-        {
-            ApplyUuHotkey(notifySuccess: true);
-            return;
-        }
-
-        _globalHotkey?.Unregister();
-        _sessionAgent.Uninstall();
-        ShowNotification(
-                Locale.Get("Notify.UuDisabled.Title"),
-                Locale.Get("Notify.UuDisabled.Message"),
-            InfoBarSeverity.Informational);
-    }
-
-    /// <summary>
-    /// 录制新的切换热键。
-    /// </summary>
-    [RelayCommand]
-    private async Task ConfigureUuHotkeyAsync()
-    {
-        var current = _settings.Current.Automation.UuViewSwitchHotkey;
-        if (await HotkeyDialog.ShowAsync(current) is not { } combination)
-        {
-            return;
-        }
-
-        _settings.Current.Automation.UuViewSwitchHotkey = combination;
-        _settings.SaveSoon();
-        OnPropertyChanged(nameof(UuHotkeyText));
-        OnPropertyChanged(nameof(UuViewSwitchMenuHeader));
-
-        // 录了热键就是要用它：顺手把开关打开，省得用户再找一次菜单。
-        UuViewSwitchEnabled = true;
-        _settings.Current.Automation.UuViewSwitchEnabled = true;
-        _settings.SaveSoon();
-        ApplyUuHotkey(notifySuccess: true);
     }
 
     /// <summary>
@@ -1241,85 +988,6 @@ public partial class MainWindowViewModel : ObservableObject
                         Locale.Format("AutoLogin.Verify.Unknown", errorCode)
         };
     }
-
-    /// <summary>
-    /// 注册或注销 UU 切换热键。
-    /// </summary>
-    /// <param name="notifySuccess">注册成功时是否提示用户。</param>
-    private void ApplyUuHotkey(bool notifySuccess)
-    {
-        if (_hotkeyWindow is null)
-        {
-            return;
-        }
-
-        // 打开软件、切换开关都会走到这里，正好是刷新锁定基线（记录串流端位置）的时机。
-        ApplyUuViewLock();
-
-        _globalHotkey ??= new GlobalHotkeyService();
-        _globalHotkey.Pressed -= OnUuHotkeyPressed;
-        _globalHotkey.Pressed += OnUuHotkeyPressed;
-        _globalHotkey.Unregister();
-
-        if (!UuViewSwitchEnabled)
-        {
-            _sessionAgent.Uninstall();
-            return;
-        }
-
-        var combination = _settings.Current.Automation.UuViewSwitchHotkey;
-        if (_globalHotkey.TryRegister(_hotkeyWindow, combination, out var error))
-        {
-            // 分身端：Console 侧热键在焦点进分身画面后会失效，必须由分身会话里的代理接住。
-            var agentReady = _sessionAgent.EnsureInstalled(combination, out var agentError);
-            if (!agentReady)
-            {
-                AppLog.Warn($"分身端安装失败，热键在分身画面内可能不生效：{agentError}");
-            }
-            else
-            {
-                // 自启项只在下次登录时生效，用户当前就开着分身，所以立刻拉一份。
-                _ = _sessionAgent.TryStartInChildSessionAsync(_childSessionService.SessionCancellationToken);
-            }
-
-            if (notifySuccess)
-            {
-                ShowNotification(
-                Locale.Get("Notify.UuEnabled.Title"),
-                Locale.Format(
-                    agentReady ? "Notify.UuEnabled.Message.Agent" : "Notify.UuEnabled.Message",
-                    GlobalHotkeyService.Format(combination)),
-                    InfoBarSeverity.Success,
-                    TimeSpan.FromSeconds(7));
-            }
-
-            return;
-        }
-
-        // 注册失败不退开关：退掉之后「快捷键设置」会跟着从菜单里消失（它只在
-        // 视角切换开启时显示），用户连改键的入口都没有了。保持开关、只提示按键没生效。
-        AppLog.Warn($"UU 视角切换热键注册失败：{error}");
-        _sessionAgent.Uninstall();
-        ShowNotification(
-            Locale.Get("Hotkey.Registered.Failed.Title"),
-            Locale.Format("Notify.Hotkey.Failed.Message", error),
-            InfoBarSeverity.Warning,
-            TimeSpan.FromSeconds(10));
-    }
-
-    /// <summary>
-    /// 分身端命中热键。和主窗口内的热键走同一条切换路径。
-    /// </summary>
-    private void OnSessionAgentSwitchRequested(object? sender, EventArgs e)
-    {
-        _ = TriggerUuViewSwitchAsync();
-    }
-
-    private void OnUuHotkeyPressed(object? sender, EventArgs e)
-    {
-        _ = TriggerUuViewSwitchAsync();
-    }
-
 
     /// <summary>
     /// 切换分辨率。参数形如 <c>1920x1080</c>。
@@ -1685,57 +1353,13 @@ public partial class MainWindowViewModel : ObservableObject
         if (Application.Current.Dispatcher.CheckAccess())
         {
             UpdateConnectionStatus();
-            EnsureSessionAgentRunning();
             return;
         }
 
         _ = Application.Current.Dispatcher.BeginInvoke(() =>
         {
             UpdateConnectionStatus();
-            EnsureSessionAgentRunning();
         });
-    }
-
-    /// <summary>
-    /// 分身连上时确保热键代理在跑。
-    ///
-    /// 启动请求由代理服务合并；只有收到热键与消息循环就绪回执才记启动成功。
-    /// 后续在线状态仍由进程及心跳判断，不以启动宽限期伪造在线。
-    /// </summary>
-    private void OnAgentHealthCheckRequested(object? sender, EventArgs e) => EnsureSessionAgentRunning();
-
-    private void EnsureSessionAgentRunning()
-    {
-        if (!UuViewSwitchEnabled || _childSessionService.ConnectedState != 1)
-        {
-            return;
-        }
-
-        if (!_sessionAgent.NeedsRestart && _sessionAgent.IsAgentOnline())
-        {
-            return;
-        }
-
-        // 状态事件来自 500ms 轮询，不加节流会反复下发启动任务。
-        var now = Environment.TickCount64;
-        if (now - _lastAgentStartTicks < 10_000)
-        {
-            return;
-        }
-
-        _lastAgentStartTicks = now;
-
-        // 进程还在就别再拉一个：新代理抢不到互斥体会立刻退出，除了多一条日志什么也做不到。
-        if (!_sessionAgent.NeedsRestart && _sessionAgent.HasLiveAgentProcess())
-        {
-            AppLog.Info("分身端进程仍在（心跳停滞），跳过重启以免多开。");
-            return;
-        }
-
-        AppLog.Info(_sessionAgent.NeedsRestart
-            ? "分身端脚本已更新，拉起新代理替换旧的。"
-            : "分身端未在运行，重新拉起。");
-        _ = _sessionAgent.TryStartInChildSessionAsync(_childSessionService.SessionCancellationToken);
     }
 
     private void OnChildSessionConnectionFailed(

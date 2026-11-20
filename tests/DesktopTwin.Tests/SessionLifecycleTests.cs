@@ -93,23 +93,6 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task SwitchingToHostInvalidatesPendingStartupBeforeAnyWindowExists()
-    {
-        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
-        Set(service, "_environmentGate", new object());
-        Set(service, "_autoLaunchPending", true);
-        Set(service, "_initialConnectionRetriesRemaining", 1);
-        var connection = new TaskCompletionSource<bool>();
-        Set(service, "_connectionAttemptCompletionSource", connection);
-        Assert.False((bool)Invoke(service, "DisconnectDesktopForSwitchCore"));
-        Assert.Equal(1, service.StartGeneration);
-        Assert.True(connection.Task.IsCompletedSuccessfully);
-        Assert.False(await connection.Task);
-        Assert.False((bool)Get(service, "_autoLaunchPending"));
-        Assert.Equal(0, (int)Get(service, "_initialConnectionRetriesRemaining"));
-    }
-
-    [Fact]
     public void PendingSettingsForNextConnectionAreNotAnActiveReconnect()
     {
         var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));

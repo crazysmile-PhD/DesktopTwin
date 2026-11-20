@@ -141,7 +141,7 @@ public partial class MainWindow : FluentWindow
         // 置顶按钮从此失效（要保留绑定只能用 SetCurrentValue）。
         Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20));
 
-        // 全局热键需要窗口句柄，构造阶段还拿不到，等 Loaded 之后再注册。
+        // 显示器与全屏监听需要窗口句柄，等 Loaded 后初始化。
         Loaded += OnWindowLoaded;
 
         // 点最大化按钮 → 进入全屏，而不是普通的「最大化到工作区」。
@@ -161,7 +161,7 @@ public partial class MainWindow : FluentWindow
         _childSessionService.DesktopSizeChanged += OnDesktopSizeChanged;
 
         // 通知条的 IsOpen 是两向绑定的：窗口隐藏期间任何一次 ShowNotification
-        // （例如 UU 串流已恢复）都会把它重新打开，而它是独立 HWND，会孤零零浮在桌面上。
+        // （例如连接状态更新）都会把它重新打开，而它是独立 HWND，会孤零零浮在桌面上。
         NotificationPopup.Opened += OnNotificationPopupOpened;
     }
 
@@ -192,7 +192,7 @@ public partial class MainWindow : FluentWindow
     /// <inheritdoc />
     protected override void OnClosed(EventArgs e)
     {
-        using var timing = new PerformanceTrace("主窗口释放（热键、代理、UU 监听与 ActiveX）");
+        using var timing = new PerformanceTrace("主窗口释放（事件订阅与 ActiveX）");
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.Detach();
@@ -234,13 +234,6 @@ public partial class MainWindow : FluentWindow
 
     private void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
-        // 只需要句柄，重复触发（窗口重新显示）时重复调用也无副作用：
-        // 内部会先注销再按当前设置重新注册。
-        if (DataContext is MainWindowViewModel viewModel)
-        {
-            viewModel.AttachWindow(this);
-        }
-
         // 监听 WM_DISPLAYCHANGE：全屏时用户改了分辨率或换了显示器，
         // 窗口要重新贴合新尺寸，缩放模式也要重新判定。
         if (_windowSource is null)

@@ -66,13 +66,6 @@ internal static class ChildSessionNativeMethods
         out IntPtr buffer,
         out int bytesReturned);
 
-    [DllImport("wtsapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WTSDisconnectSession(
-        IntPtr serverHandle,
-        uint sessionId,
-        [MarshalAs(UnmanagedType.Bool)] bool wait);
-
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumChildWindows(
@@ -201,8 +194,7 @@ internal static class ChildSessionNativeMethods
     /// <summary>
     /// 枚举本机全部会话。
     ///
-    /// 失败时返回空数组而不是抛异常：调用方（UU 视角切换）在切换过程中会被别的进程
-    /// 反复改变会话状态，查询失败是常态，不该让一次查询失败打断整个切换流程。
+    /// 查询失败时返回空数组；会话状态可能在枚举过程中改变。
     /// </summary>
     internal static IReadOnlyList<SessionInfo> EnumerateSessions()
     {
@@ -277,17 +269,6 @@ internal static class ChildSessionNativeMethods
         }
 
         return -1;
-    }
-
-    /// <summary>
-    /// 断开一个会话但不注销它：桌面上的程序继续运行，会话进入 Disconnected 状态。
-    ///
-    /// 这是 UU 视角切换「去整台电脑」的关键一步——UU 的被控端由 SYSTEM 服务拉起，
-    /// 只会挑会话号最大的已登录桌面，把分身断掉它就只能落到 Console。
-    /// </summary>
-    internal static bool DisconnectSession(uint sessionId, bool wait = false)
-    {
-        return WTSDisconnectSession(CurrentServerHandle, sessionId, wait);
     }
 
     /// <summary>
