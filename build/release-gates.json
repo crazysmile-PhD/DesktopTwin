@@ -27,6 +27,7 @@
       "DesktopTwin.Tests.RelativeInputTests.ShortReleaseChordAndClickAreRememberedBetweenTimerSamples",
       "DesktopTwin.Tests.RelativeInputTests.AltMenuClickKeepsManualReleaseAndFocusLossClearsStaleModifiers",
       "DesktopTwin.Tests.RdpCaptureGestureTests.NativeObserverKeepsReceivingReleasedClicksAndDetachesFromReplacedWindows",
+      "DesktopTwin.Tests.RdpCaptureGestureTests.MessageFilterObservesNestedRdpMouseWindowsBeforeNativePreprocessing",
       "DesktopTwin.Tests.RelativeInputTests.RawRelativeMotionIsUnscaledAndAbsoluteDevicesRebaseOnDeviceOrDisplayChange",
       "DesktopTwin.Tests.RelativeInputTests.MovementCoalescesWithoutReorderingButtonTransitionsOrLosingOverflow",
       "DesktopTwin.Tests.RelativeInputTests.LeaseRevocationReleasesHeldInputsAndPreventsLateMovement",

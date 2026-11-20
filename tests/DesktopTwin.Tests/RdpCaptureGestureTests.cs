@@ -7,18 +7,54 @@ namespace DesktopTwin.Tests;
 public sealed class RdpCaptureGestureTests
 {
     [Fact]
-    public void NativeObserverKeepsReceivingReleasedClicksAndDetachesFromReplacedWindows()
+    public void NativeObserverKeepsReceivingReleasedClicksAndDetachesFromReplacedWindows() => RunOnSta(CheckObserver);
+
+    [Fact]
+    public void MessageFilterObservesNestedRdpMouseWindowsBeforeNativePreprocessing() => RunOnSta(CheckNestedFilter);
+
+    private static void RunOnSta(Action action)
     {
         ExceptionDispatchInfo? failure = null;
         var thread = new Thread(() =>
         {
-            try { CheckObserver(); }
+            try { action(); }
             catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); }
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(10)), "Native gesture observation did not finish.");
         failure?.Throw();
+    }
+
+    private static void CheckNestedFilter()
+    {
+        var root = new System.Windows.Forms.NativeWindow();
+        var child = new System.Windows.Forms.NativeWindow();
+        root.CreateHandle(new System.Windows.Forms.CreateParams { Parent = (nint)(-3) });
+        try
+        {
+            child.CreateHandle(new System.Windows.Forms.CreateParams { Parent = root.Handle, Style = 0x40000000 });
+            try
+            {
+                var clicks = 0;
+                using var capture = new RelativeMouseCapture(_ => false, (_, _, _) => clicks++);
+                capture.Observe(root.Handle, root.Handle);
+                var message = System.Windows.Forms.Message.Create(child.Handle, 0x201, 1, 0);
+                Assert.False(System.Windows.Forms.Application.FilterMessage(ref message));
+                Assert.Equal(1, clicks);
+                var outside = System.Windows.Forms.Message.Create(0, 0x201, 1, 0);
+                Assert.False(System.Windows.Forms.Application.FilterMessage(ref outside));
+                Assert.Equal(1, clicks);
+                capture.Stop();
+                Assert.False(System.Windows.Forms.Application.FilterMessage(ref message));
+                Assert.Equal(2, clicks);
+                capture.Detach();
+                Assert.False(System.Windows.Forms.Application.FilterMessage(ref message));
+                Assert.Equal(2, clicks);
+            }
+            finally { child.DestroyHandle(); }
+        }
+        finally { root.DestroyHandle(); }
     }
 
     private static void CheckObserver()
@@ -35,13 +71,13 @@ public sealed class RdpCaptureGestureTests
                 var observed = new List<int>();
                 using var capture = new RelativeMouseCapture(_ => throw new InvalidOperationException("Unexpected injection"),
                     (message, _, _) => observed.Add(message));
-                capture.Observe(first.Handle);
+                capture.Observe(first.Handle, first.Handle);
                 capture.Stop();
                 SendMessage(first.Handle, 0x201, 1, 0);
                 SendMessage(first.Handle, 0x202, 0, 0);
                 Assert.False(capture.Active);
                 Assert.Equal(new[] { 0x201 }, observed);
-                capture.Observe(second.Handle);
+                capture.Observe(second.Handle, second.Handle);
                 SendMessage(first.Handle, 0x201, 1, 0);
                 SendMessage(second.Handle, 0x104, 0x12, 0);
                 Assert.Equal(new[] { 0x201, 0x104 }, observed);

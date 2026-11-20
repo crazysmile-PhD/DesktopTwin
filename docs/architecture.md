@@ -69,6 +69,8 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 
 ## 后台工作与状态
 
+游戏鼠标的手势与按钮在 `WindowsFormsHost` 的 `IMessageFilter` 阶段观察，范围限定为 RDP 原生窗口及其子窗口。ActiveX 的预处理可能先于选中输入 HWND 的窗口过程处理消息，因此仅给该 HWND 加窗口过程监听不足以覆盖点击；释放后过滤器仍保留，断开和替换窗口时移除。该顺序见 [WPF/WinForms 消息互操作](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/windows-forms-and-wpf-interoperability-input-architecture)。
+
 游戏相对输入由 `RelativeInputController` 持有：前台、控制模式、画面内指针和远端隐藏光标共同决定捕获。捕获期间对子窗口原生输入进行替换，只发送 Raw Input 位移；普通坐标继续由 RDP 处理。Raw Input 的注册仅有一个进程内所有者，退出捕获时有条件恢复原注册；失焦释放自己的 ClipCursor，不覆盖其他应用取得的限制。
 
 `RelativeInputSession` 持有一个当前用户、同提升级别的管道，核对接收端 PID、路径、用户和会话。接收端为嵌入的 Framework 小程序，通过既有临时任务/启动代理进入会话；先查验任务删除再创建接收端。无窗口创建回执只证明进程创建，随后必须完成接收端自己的握手。启动确认期间发送未授权心跳，避免首次确认延迟耗尽活动输入租约。主 UI 的授权 250ms 过期；接收端活动心跳 1500ms 超时即关闭并释放输入。队列有界，仅合并相邻移动，按钮和按键保持顺序，过载断开而不静默丢弃释放。

@@ -87,10 +87,7 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
                 if (request.X < 0 || request.Y < 0 || request.X >= rect.Right - rect.Left || request.Y >= rect.Bottom - rect.Top)
                     throw new ArgumentOutOfRangeException(nameof(request), "Click is outside the RDP surface.");
                 if (!window.RelativeInput.Click())
-                {
-                    DiagnosticInput.MoveTo(rect.Left + request.X, rect.Top + request.Y);
-                    DiagnosticInput.Mouse(0, 0, click: true);
-                }
+                    await ClickAtAsync(request, rect, cancellationToken);
             }
             else
             {
@@ -108,6 +105,21 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
             if (scan != 0) SendKey(scan, true, sessionInput);
             if (alt) SendKey(0x38, true, sessionInput);
         }
+    }
+
+    private async Task ClickAtAsync(DesktopControlRequest request, WindowNativeMethods.NativeRect rect,
+        CancellationToken cancellationToken)
+    {
+        DiagnosticInput.MoveTo(rect.Left + request.X, rect.Top + request.Y);
+        // Let the native RDP message loop forward the new position before button transitions and Alt-up.
+        await Task.Delay(150, cancellationToken);
+        RequireControlInput();
+        try
+        {
+            DiagnosticInput.Button(false);
+            await Task.Delay(request.Milliseconds, cancellationToken);
+        }
+        finally { DiagnosticInput.Button(true); }
     }
 
     private async Task HoldAltForMenuAsync(bool sessionInput, CancellationToken cancellationToken)
@@ -178,7 +190,8 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
             relativeReadback = RdpHost.RelativeMouseModeAfterLogin,
             relativeReported = RdpHost.ReportedRelativeMouseMode,
             sessionInput = new { ready = window.RelativeInput.Ready, captured = window.RelativeInput.Captured,
-                rawMoves = window.RelativeInput.RawMoves, status = window.RelativeInput.Status, failure = window.RelativeInput.Failure },
+                rawMoves = window.RelativeInput.RawMoves, nativeClicks = window.RelativeInput.NativeClicks,
+                nativeKeys = window.RelativeInput.NativeKeys, status = window.RelativeInput.Status, failure = window.RelativeInput.Failure },
             cursor = DiagnosticInput.CaptureState(),
             inputFocused = RdpHost.IsHandleCreated && ChildSessionNativeMethods.IsRdpInputWindowFocused(RdpHost.Handle)
         };

@@ -30,6 +30,8 @@ internal sealed class RelativeInputController : IDisposable
     internal RelativeInputStatus? Status => _session?.Status;
     internal string? Failure { get; private set; }
     internal long RawMoves => _capture.RawMoves;
+    internal long NativeClicks => _capture.ObservedClicks;
+    internal long NativeKeys => _capture.ObservedKeys;
 
     internal RelativeInputController(MainWindow window, SettingsService settings)
     {
@@ -87,7 +89,7 @@ internal sealed class RelativeInputController : IDisposable
         _gesture.ObserveModifiers(alt, RawMouseNative.GetAsyncKeyState(0x11) < 0);
         var inputWindow = ChildSessionNativeMethods.GetRdpInputWindow(_window.RdpHost.Handle);
         if (inputWindow == 0) { Release(); return; }
-        _capture.Observe(inputWindow);
+        _capture.Observe(inputWindow, _window.RdpHost.Handle);
         WindowNativeMethods.TryGetWindowRect(_window.RdpHost.Handle, out var bounds);
         var point = DiagnosticInput.Cursor();
         var inside = point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom;

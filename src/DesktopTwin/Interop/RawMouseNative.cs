@@ -56,6 +56,9 @@ internal static class RawMouseNative
     internal static extern nint DefWindowProc(nint window, uint message, nint wParam, nint lParam);
     [DllImport("user32.dll")]
     internal static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsChild(nint parent, nint child);
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool ClipCursor(ref WindowNativeMethods.NativeRect rect);

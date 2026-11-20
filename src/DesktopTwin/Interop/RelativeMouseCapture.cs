@@ -7,24 +7,34 @@ using DesktopTwin.Services;
 namespace DesktopTwin.Interop;
 
 /// <summary>Observes RDP gestures even while released; captured raw motion replaces legacy motion.</summary>
-internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<int, int, bool> observe) : NativeWindow, IDisposable
+internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<int, int, bool> observe) : NativeWindow, IMessageFilter, IDisposable
 {
     private readonly RawMouseDeltas _deltas = new();
     private RawMouseNative.Device? _previousRegistration;
     private WindowNativeMethods.NativeRect _clip;
     private bool _ownsClip;
+    private nint _surface;
+    private bool _filterAttached;
     internal bool Active { get; private set; }
     internal long RawMoves { get; private set; }
+    internal long ObservedClicks { get; private set; }
+    internal long ObservedKeys { get; private set; }
 
-    internal void Observe(nint inputWindow)
+    internal void Observe(nint inputWindow, nint surface)
     {
-        if (Handle == inputWindow) return;
-        Detach();
-        AssignHandle(inputWindow);
+        if (Handle != inputWindow)
+        {
+            Detach();
+            AssignHandle(inputWindow);
+        }
+        _surface = surface;
+        if (_filterAttached) return;
+        Application.AddMessageFilter(this);
+        _filterAttached = true;
     }
     internal void Start(nint inputWindow, WindowNativeMethods.NativeRect bounds)
     {
-        Observe(inputWindow);
+        if (Handle != inputWindow) throw new InvalidOperationException("Observe the RDP surface before capturing it.");
         if (Active) return;
         _previousRegistration = RawMouseNative.RegisteredMouse();
         Active = true;
@@ -70,13 +80,29 @@ internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<
     internal void Detach()
     {
         Stop();
+        if (_filterAttached) Application.RemoveMessageFilter(this);
+        _filterAttached = false;
+        _surface = 0;
         if (Handle != 0) ReleaseHandle();
+    }
+    public bool PreFilterMessage(ref Message message)
+    {
+        if (_surface == 0 || (message.HWnd != _surface && !RawMouseNative.IsChild(_surface, message.HWnd))) return false;
+        var alt = RawMouseNative.GetAsyncKeyState(0x12) < 0;
+        ObserveMessage(message, alt);
+        return Active && !alt && FilterMouse(message);
+    }
+    private void ObserveMessage(Message message, bool alt)
+    {
+        if (message.Msg is 0x201 or 0x203) ObservedClicks++;
+        if (message.Msg is 0x100 or 0x101 or 0x104 or 0x105) ObservedKeys++;
+        if (message.Msg is 0x100 or 0x101 or 0x104 or 0x105 or 0x201 or 0x203)
+            observe(message.Msg, (int)message.WParam, alt);
     }
     protected override void WndProc(ref Message message)
     {
         var alt = RawMouseNative.GetAsyncKeyState(0x12) < 0;
-        if (message.Msg is 0x100 or 0x101 or 0x104 or 0x105 or 0x201 or 0x203)
-            observe(message.Msg, (int)message.WParam, alt);
+        ObserveMessage(message, alt);
         if (!Active) { base.WndProc(ref message); return; }
         if (alt) ReleaseConfinement();
         if (message.Msg == 0xFF && !alt)

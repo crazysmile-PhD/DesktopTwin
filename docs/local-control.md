@@ -28,7 +28,7 @@ Start-Process ./DesktopTwin.exe -ArgumentList @('--control-pipe', $pipeName)
 | `{"command":"release_mouse","milliseconds":100}` | 在宿主发送固定 Ctrl+Alt 释放手势，最长 1000 毫秒；0 毫秒可测试快速手势 |
 | `{"command":"launch_target"}` | 调用已配置目标的启动流程，保留原有授权确认 |
 | `{"command":"resize","width":960,"height":700}` | 以 DIP 调整宿主，限制在当前显示器工作区；不允许在不可调整的全屏状态执行 |
-| `{"command":"click","x":400,"y":300,"alt":true}` | 在原生 RDP 画面内的物理像素坐标左击，可短暂按住 Alt |
+| `{"command":"click","x":400,"y":300,"alt":true}` | 在原生 RDP 画面内的物理像素坐标左击，可短暂按住 Alt；先等坐标传递，再按住按钮 `milliseconds`（默认 100ms，0 可测试瞬时点击） |
 | `{"command":"mouse","x":100,"y":0}` | 从已位于画面内的光标位置发送相对移动，每轴最多 500；结果仍受系统指针加速和 RDP 模式影响 |
 | `{"command":"key","key":"W","milliseconds":200}` | 按住允许键，最长 1000 毫秒，结束或取消后释放 |
 

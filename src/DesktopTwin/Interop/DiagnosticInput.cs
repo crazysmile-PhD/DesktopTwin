@@ -48,6 +48,8 @@ internal static class DiagnosticInput
         Send([input]);
     }
 
+    internal static void Button(bool up) => Send([MouseEvent(0, 0, up ? 0x0004u : 0x0002u)]);
+
     private static InputEvent MouseEvent(int dx, int dy, uint flags)
     {
         var input = new InputEvent();
