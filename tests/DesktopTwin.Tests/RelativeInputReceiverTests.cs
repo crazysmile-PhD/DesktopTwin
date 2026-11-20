@@ -10,13 +10,69 @@ namespace DesktopTwin.Tests;
 public sealed class RelativeInputReceiverTests
 {
     [Fact]
+    public async Task BootstrapClosesFailedReceiverAndRetriesItsCreationReceiptOnlyOnce()
+    {
+        var receivers = new List<Process>();
+        RelativeInputSession? session = null;
+        try
+        {
+            session = await RelativeInputSession.ConnectAsync((uint)Process.GetCurrentProcess().SessionId, default,
+                (path, arguments, token) => LaunchForBootstrapAsync(path, arguments, receivers,
+                    attempt => attempt == 1 ? new SessionLaunchReceiptMismatchException("test receipt") : null, token));
+            Assert.True(session.Ready);
+            Assert.Equal(2, receivers.Count);
+            await receivers[0].WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(receivers[0].HasExited);
+            Assert.False(receivers[1].HasExited);
+        }
+        finally
+        {
+            session?.Dispose();
+            foreach (var receiver in receivers) { await StopAsync(receiver); receiver.Dispose(); }
+        }
+    }
+
+    [Theory]
+    [InlineData(true, 2)]
+    [InlineData(false, 1)]
+    public async Task BootstrapHasABoundedRetryAndDoesNotRetryOtherLaunchFailures(bool receiptFailure, int expectedLaunches)
+    {
+        var receivers = new List<Process>();
+        try
+        {
+            var error = await Record.ExceptionAsync(async () =>
+            {
+                using var session = await RelativeInputSession.ConnectAsync((uint)Process.GetCurrentProcess().SessionId, default,
+                    (path, arguments, token) => LaunchForBootstrapAsync(path, arguments, receivers,
+                        _ => receiptFailure ? new SessionLaunchReceiptMismatchException("test receipt") : new IOException("test IO failure"), token));
+            });
+            if (receiptFailure) Assert.IsType<SessionLaunchReceiptMismatchException>(error);
+            else Assert.IsType<IOException>(error);
+            Assert.Equal(expectedLaunches, receivers.Count);
+            foreach (var receiver in receivers) await receiver.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally { foreach (var receiver in receivers) { await StopAsync(receiver); receiver.Dispose(); } }
+    }
+
+    private static async Task LaunchForBootstrapAsync(string path, string arguments,
+        List<Process> receivers, Func<int, Exception?> failure, CancellationToken token)
+    {
+        var receiver = Process.Start(new ProcessStartInfo(path, arguments) { UseShellExecute = false, CreateNoWindow = true })
+            ?? throw new IOException("Receiver did not start.");
+        receivers.Add(receiver);
+        var attempt = receivers.Count;
+        await Task.Delay(500, token);
+        if (failure(attempt) is { } error) throw error;
+    }
+
+    [Fact]
     public async Task RealReceiverReportsItsSessionAndExitsWhenHostDisconnects()
     {
-        using var session = new RelativeInputSession();
+        RelativeInputSession? session = null;
         Process? receiver = null;
         try
         {
-            await session.StartAsync((uint)Process.GetCurrentProcess().SessionId, default, (path, arguments, token) =>
+            session = await RelativeInputSession.ConnectAsync((uint)Process.GetCurrentProcess().SessionId, default, (path, arguments, token) =>
             {
                 receiver = Process.Start(new ProcessStartInfo(path, arguments) { UseShellExecute = false, CreateNoWindow = true });
                 // Real first-launch verification can outlast the receiver's active input lease.
@@ -35,7 +91,7 @@ public sealed class RelativeInputReceiverTests
         }
         finally
         {
-            session.Dispose();
+            session?.Dispose();
             if (receiver is not null)
             {
                 await StopAsync(receiver);

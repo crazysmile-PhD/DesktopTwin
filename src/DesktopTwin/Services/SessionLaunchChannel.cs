@@ -39,7 +39,7 @@ internal sealed class SessionLaunchChannel : IDisposable
                 throw new IOException("无法确认启动代理的进程身份。");
             using var process = Process.GetProcessById(checked((int)pid));
             if ((uint)process.SessionId != _sessionId
-                || !string.Equals(process.MainModule?.FileName, _workerPath, StringComparison.OrdinalIgnoreCase))
+                || !string.Equals(ProcessCreationIdentity.ReadImagePath(process.Id), _workerPath, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("启动代理身份或会话不匹配。");
             var expectedUser = System.Security.Principal.WindowsIdentity.GetCurrent().User;
             System.Security.Principal.SecurityIdentifier? peerUser = null;
@@ -77,11 +77,17 @@ internal sealed class SessionLaunchChannel : IDisposable
                 var error = reader.ReadString();
                 if (!ready) throw new InvalidOperationException($"启动未确认（PID {pid}）：{error}");
                 using var target = Process.GetProcessById(pid);
-                if (target.HasExited || session != _sessionId || target.SessionId != session
-                    || target.StartTime.ToUniversalTime().Ticks != started
-                    || !string.Equals(target.MainModule?.FileName, path, StringComparison.OrdinalIgnoreCase)
+                var exited = target.HasExited;
+                var observedSession = target.SessionId;
+                var observedStart = exited ? 0 : ProcessCreationIdentity.Read(pid);
+                // The loader's MainModule list can still be empty immediately after CreateProcess.
+                var pathMatches = !exited && string.Equals(ProcessCreationIdentity.ReadImagePath(pid), path, StringComparison.OrdinalIgnoreCase);
+                if (exited || session != _sessionId || observedSession != session
+                    || observedStart != started || !pathMatches
                     || (requireWindow && window == 0))
-                    throw new InvalidOperationException("启动回执与实际目标进程不匹配，未确认启动成功。");
+                    throw new SessionLaunchReceiptMismatchException($" PID={pid}, exited={exited}, "
+                        + $"session={session}/{observedSession}, creationFileTime={started}/{observedStart}, "
+                        + $"pathMatch={pathMatches}, window=0x{window:X}.");
                 AppLog.Info($"已确认会话 {session} 中的 {path} {(requireWindow ? "窗口就绪" : "进程创建（能力待握手）")}，PID {pid}，"
                     + $"可响应窗口 0x{window:X}。");
             }, budget.Token).ConfigureAwait(false);

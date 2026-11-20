@@ -6,7 +6,7 @@ namespace DesktopTwin.Launching
     // Shared with the C# 5 / .NET Framework worker. No success is inferred from RunEx.
     internal static class SessionLaunchProtocol
     {
-        internal const int Version = 3;
+        internal const int Version = 4;
         internal const int ObservationMilliseconds = 30000;
         internal const int ConnectionMilliseconds = 15000;
 

@@ -33,6 +33,8 @@
       "DesktopTwin.Tests.RelativeInputTests.LeaseRevocationReleasesHeldInputsAndPreventsLateMovement",
       "DesktopTwin.Tests.RelativeInputTests.OpeningAMenuReleasesButtonsWithoutReleasingItsHeldAltKey",
       "DesktopTwin.Tests.RelativeInputReceiverTests.RealReceiverReportsItsSessionAndExitsWhenHostDisconnects",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.BootstrapClosesFailedReceiverAndRetriesItsCreationReceiptOnlyOnce",
+      "DesktopTwin.Tests.ProcessImageIdentityTests.ImageIdentityIsAvailableBeforeTheTargetLoaderStarts",
       "DesktopTwin.Tests.RelativeInputReceiverTests.ReceiverStopsWhenTheHostLeaseExpiresEvenIfTheHostProcessIsAlive",
       "DesktopTwin.Tests.RelativeInputReceiverTests.ReceiverRejectsWrongParentAndWrongSessionBeforeAcceptingInput",
       "DesktopTwin.Tests.SessionLaunchIntegrationTests.HeadlessCompanionCreationDoesNotRequireAVisibleWindow"

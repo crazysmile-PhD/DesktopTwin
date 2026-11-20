@@ -20,6 +20,8 @@
 
 ## 证据与边界
 
+进程创建时间使用两端共用的 `GetProcessTimes` 原始 FILETIME；映像路径用 `QueryFullProcessImageNameW` 读取。无窗口接收端可以在用户态加载器初始化前回报创建，不能把 `Process.MainModule` 此时尚未就绪当成路径不符。PID、会话、创建时间和完整路径仍须全部匹配；不匹配日志记录具体核验字段。内部输入接收端关闭失败管道后，仅对创建回执不匹配重试一次，每次重新握手；普通目标程序仍不自动重发。
+
 | 情况 | 结果 |
 | --- | --- |
 | 任务运行请求返回 | 只说明引导开始，不能报告目标启动成功 |
@@ -39,6 +41,7 @@
 - [TaskSettings.DeleteExpiredTaskAfter](https://learn.microsoft.com/en-us/windows/win32/taskschd/tasksettings-deleteexpiredtaskafter)：全部触发器超过结束边界后到期，由系统调度服务删除。
 - [SendMessageTimeout](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagetimeoutw)：窗口响应检查使用有界调用，避免被目标界面卡死拖住。
 - [Process.WaitForInputIdle](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.waitforinputidle)：适用于有消息循环的程序，不能独自证明可见窗口或业务就绪。
+- [QueryFullProcessImageNameW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew) 与 [GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)：核对 Windows 记录的映像路径和创建身份。
 
 ## 验证
 

@@ -80,8 +80,9 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
     [Fact]
     public async Task HeadlessCompanionCreationDoesNotRequireAVisibleWindow()
     {
-        await WithWorker(channel => channel.LaunchAndConfirmAsync(_fixture.Target, "hidden", _fixture.Directory,
-            default, requireWindow: false));
+        for (var attempt = 0; attempt < 10; attempt++)
+            await WithWorker(channel => channel.LaunchAndConfirmAsync(_fixture.Target, "hidden", _fixture.Directory,
+                default, requireWindow: false));
     }
 
     [Fact]

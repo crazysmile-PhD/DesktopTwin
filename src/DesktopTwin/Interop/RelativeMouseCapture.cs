@@ -15,6 +15,9 @@ internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<
     private bool _ownsClip;
     private nint _surface;
     private bool _filterAttached;
+    private uint _legacyButtons;
+    internal bool HasLegacyButtons => _legacyButtons != 0;
+    internal void ClearLegacyButtons() => _legacyButtons = 0;
     internal bool Active { get; private set; }
     internal long RawMoves { get; private set; }
     internal long ObservedClicks { get; private set; }
@@ -83,6 +86,7 @@ internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<
         if (_filterAttached) Application.RemoveMessageFilter(this);
         _filterAttached = false;
         _surface = 0;
+        ClearLegacyButtons();
         if (Handle != 0) ReleaseHandle();
     }
     public bool PreFilterMessage(ref Message message)
@@ -94,6 +98,18 @@ internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<
     }
     private void ObserveMessage(Message message, bool alt)
     {
+        if (!Active)
+        {
+            if (message.Msg == 0x200)
+                _legacyButtons = ((uint)message.WParam & 3) | (((uint)message.WParam & 0x70) >> 2);
+            var button = ButtonNumber(message);
+            if (button != 0)
+            {
+                var bit = 1u << (button - 1);
+                if (IsButtonUp(message.Msg)) _legacyButtons &= ~bit;
+                else _legacyButtons |= bit;
+            }
+        }
         if (message.Msg is 0x201 or 0x203) ObservedClicks++;
         if (message.Msg is 0x100 or 0x101 or 0x104 or 0x105) ObservedKeys++;
         if (message.Msg is 0x100 or 0x101 or 0x104 or 0x105 or 0x201 or 0x203)
@@ -128,15 +144,16 @@ internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<
             send(new InputPacket(InputOperation.Wheel, message.Msg == 0x20A ? 0 : 1, (short)((long)message.WParam >> 16)));
             return true;
         }
-        var button = message.Msg switch
+        var button = ButtonNumber(message);
+        if (button == 0) return false;
+        send(new InputPacket(InputOperation.Button, button, IsButtonUp(message.Msg) ? 0 : 1));
+        return true;
+    }
+    private static bool IsButtonUp(int message) => message is 0x202 or 0x205 or 0x208 or 0x20C;
+    private static int ButtonNumber(Message message) => message.Msg switch
         {
             >= 0x201 and <= 0x203 => 1, >= 0x204 and <= 0x206 => 2, >= 0x207 and <= 0x209 => 3,
             >= 0x20B and <= 0x20D => 3 + (int)(((long)message.WParam >> 16) & 0xFFFF), _ => 0
         };
-        if (button == 0) return false;
-        var down = message.Msg is not (0x202 or 0x205 or 0x208 or 0x20C);
-        send(new InputPacket(InputOperation.Button, button, down ? 1 : 0));
-        return true;
-    }
     public void Dispose() => Detach();
 }

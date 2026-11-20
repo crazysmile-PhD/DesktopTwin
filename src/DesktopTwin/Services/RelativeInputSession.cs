@@ -7,6 +7,7 @@ using System.Security.Principal;
 using System.Threading;
 using System.Threading.Tasks;
 using DesktopTwin.Input;
+using DesktopTwin.Launching;
 
 namespace DesktopTwin.Services;
 
@@ -33,6 +34,27 @@ internal sealed class RelativeInputSession : IDisposable
     {
         _pipe = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | PipeOptions.FirstPipeInstance);
+    }
+
+    internal static async Task<RelativeInputSession> ConnectAsync(uint sessionId, CancellationToken cancellationToken,
+        Func<string, string, CancellationToken, Task>? launch = null)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var session = new RelativeInputSession();
+            try
+            {
+                await session.StartAsync(sessionId, cancellationToken, launch).ConfigureAwait(false);
+                return session;
+            }
+            catch (SessionLaunchReceiptMismatchException error) when (attempt == 0 && !cancellationToken.IsCancellationRequested)
+            {
+                session.Dispose();
+                AppLog.Warn("内部输入接收端创建核验失败，关闭旧通道后仅重试一次。", error);
+                await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+            }
+            catch { session.Dispose(); throw; }
+        }
     }
 
     internal async Task StartAsync(uint sessionId, CancellationToken cancellationToken,
@@ -91,7 +113,7 @@ internal sealed class RelativeInputSession : IDisposable
     {
         using var process = Process.GetProcessById(checked((int)PeerProcessId()));
         if (process.SessionId != sessionId || process.HasExited
-            || !string.Equals(process.MainModule?.FileName, path, StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(ProcessCreationIdentity.ReadImagePath(process.Id), path, StringComparison.OrdinalIgnoreCase))
             throw new IOException("Input receiver process/session does not match.");
         using var identity = WindowsIdentity.GetCurrent();
         SecurityIdentifier? peer = null;

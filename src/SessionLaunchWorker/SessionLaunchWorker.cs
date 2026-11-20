@@ -75,7 +75,7 @@ namespace DesktopTwinSessionLaunchWorker
                 target = Process.Start(info);
                 if (target == null) throw new InvalidOperationException("未取得目标进程。");
                 pid = target.Id;
-                started = target.StartTime.ToUniversalTime().Ticks;
+                started = ProcessCreationIdentity.Read(pid);
                 if (target.SessionId != request.SessionId)
                     throw new InvalidOperationException("目标进程不在请求的会话中。");
 

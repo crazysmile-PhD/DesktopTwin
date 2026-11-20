@@ -120,6 +120,8 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
             await Task.Delay(request.Milliseconds, cancellationToken);
         }
         finally { DiagnosticInput.Button(true); }
+        // RDP/game input is asynchronous: process button-up while its modifier is still held.
+        await Task.Delay(250, cancellationToken);
     }
 
     private async Task HoldAltForMenuAsync(bool sessionInput, CancellationToken cancellationToken)

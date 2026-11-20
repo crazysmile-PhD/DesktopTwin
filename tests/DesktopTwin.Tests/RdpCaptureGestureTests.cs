@@ -42,13 +42,24 @@ public sealed class RdpCaptureGestureTests
                 var message = System.Windows.Forms.Message.Create(child.Handle, 0x201, 1, 0);
                 Assert.False(System.Windows.Forms.Application.FilterMessage(ref message));
                 Assert.Equal(1, clicks);
+                Assert.True(capture.HasLegacyButtons);
+                var rightDown = System.Windows.Forms.Message.Create(child.Handle, 0x204, 2, 0);
+                System.Windows.Forms.Application.FilterMessage(ref rightDown);
+                var leftUp = System.Windows.Forms.Message.Create(child.Handle, 0x202, 0, 0);
+                System.Windows.Forms.Application.FilterMessage(ref leftUp);
+                Assert.True(capture.HasLegacyButtons); // Releasing one button cannot transfer the other button's ownership.
+                var rightUp = System.Windows.Forms.Message.Create(child.Handle, 0x205, 0, 0);
+                System.Windows.Forms.Application.FilterMessage(ref rightUp);
+                Assert.False(capture.HasLegacyButtons);
                 var outside = System.Windows.Forms.Message.Create(0, 0x201, 1, 0);
                 Assert.False(System.Windows.Forms.Application.FilterMessage(ref outside));
                 Assert.Equal(1, clicks);
                 capture.Stop();
                 Assert.False(System.Windows.Forms.Application.FilterMessage(ref message));
                 Assert.Equal(2, clicks);
+                Assert.True(capture.HasLegacyButtons);
                 capture.Detach();
+                Assert.False(capture.HasLegacyButtons);
                 Assert.False(System.Windows.Forms.Application.FilterMessage(ref message));
                 Assert.Equal(2, clicks);
             }

@@ -45,7 +45,7 @@ internal sealed class RelativeInputController : IDisposable
         window.IsVisibleChanged += OnVisibility;
         _poll.Start();
     }
-    private void OnLogin(object? sender, EventArgs e) { _failed = false; StopSession(); }
+    private void OnLogin(object? sender, EventArgs e) { _failed = false; Failure = null; StopSession(); }
     private void OnDeactivated(object? sender, EventArgs e) => Release();
     private void OnVisibility(object sender, DependencyPropertyChangedEventArgs e) { if (!_window.IsVisible) Release(); }
     private bool Send(InputPacket packet) => _session?.TrySend(packet) == true;
@@ -94,6 +94,7 @@ internal sealed class RelativeInputController : IDisposable
         var point = DiagnosticInput.Cursor();
         var inside = point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom;
         var capture = !alt && !_gesture.Released && Status?.CursorVisible == false && inside
+            && (Captured || !_capture.HasLegacyButtons)
             && ChildSessionNativeMethods.IsRdpInputWindowFocused(_window.RdpHost.Handle);
         if (!capture) { ReleasePointer(); return; }
         _capture.Start(inputWindow, bounds);
@@ -103,12 +104,14 @@ internal sealed class RelativeInputController : IDisposable
     {
         using var start = new CancellationTokenSource();
         _starting = start;
-        var session = new RelativeInputSession();
-        _session = session;
-        _sessionId = id;
+        RelativeInputSession? session = null;
         try
         {
-            await session.StartAsync(id, start.Token);
+            session = await RelativeInputSession.ConnectAsync(id, start.Token);
+            start.Token.ThrowIfCancellationRequested();
+            _session = session;
+            _sessionId = id;
+            Failure = null;
             if (!start.IsCancellationRequested && _window.DataContext is MainWindowViewModel vm)
                 vm.NotifyRelativeInputReady();
         }
@@ -118,7 +121,7 @@ internal sealed class RelativeInputController : IDisposable
         finally
         {
             if (ReferenceEquals(_starting, start)) _starting = null;
-            if (start.IsCancellationRequested || !session.Ready) session.Dispose();
+            if (session is not null && (start.IsCancellationRequested || !session.Ready)) session.Dispose();
         }
     }
     private void Fail(Exception error)
@@ -134,7 +137,13 @@ internal sealed class RelativeInputController : IDisposable
         if (Captured) Send(new InputPacket(InputOperation.ReleasePointer));
         _capture.Stop();
     }
-    private void Release() { ReleasePointer(); _gesture.ClearModifiers(); _session?.SetForegroundLease(false); }
+    private void Release()
+    {
+        ReleasePointer();
+        _capture.ClearLegacyButtons();
+        _gesture.ClearModifiers();
+        _session?.SetForegroundLease(false);
+    }
     private void StopSession()
     {
         Release();
