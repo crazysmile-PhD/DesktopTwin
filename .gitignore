@@ -18,6 +18,7 @@ artifacts/
 ## 测试与覆盖率
 [Tt]est[Rr]esult*/
 coverage*.json
+!build/coverage-policy.json
 coverage*.xml
 *.coverage
 *.coveragexml

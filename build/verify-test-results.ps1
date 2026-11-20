@@ -37,6 +37,15 @@ foreach ($entry in $entries) {
         $failures += "Missing coverage for $($entry.Name)."
         continue
     }
+    $asyncProperty = $entry.Value.PSObject.Properties['asyncMethods']
+    if ($null -ne $asyncProperty) {
+        foreach ($method in $asyncProperty.Value) {
+            $prefix = $entry.Name + '/<' + $method + '>d__'
+            if (-not @($matches | Where-Object { $_.name.StartsWith($prefix, [StringComparison]::Ordinal) }).Count) {
+                $failures += "Missing async body coverage for $($entry.Name).$method."
+            }
+        }
+    }
     foreach ($class in $matches) {
       foreach ($metric in @('line', 'branch')) {
         $minimum = [double]$entry.Value.$metric

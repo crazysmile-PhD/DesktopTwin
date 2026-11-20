@@ -27,6 +27,12 @@ try {
     Assert-Rejected { & $gate -ResultsDirectory $directory -PolicyPath $policy }
     Set-Content -LiteralPath $coverage -Value '<coverage line-rate="1"><packages><package><classes><class name="Example.Core" line-rate="1" branch-rate="1" /></classes></package></packages></coverage>' -Encoding UTF8
     & $gate -ResultsDirectory $directory -PolicyPath $policy
+    Set-Content -LiteralPath $policy -Value '{"Example.Core":{"line":0.9,"branch":0.8,"asyncMethods":["RunAsync"]}}' -Encoding UTF8
+    Assert-Rejected { & $gate -ResultsDirectory $directory -PolicyPath $policy }
+    Set-Content -LiteralPath $coverage -Value '<coverage line-rate="1"><packages><package><classes><class name="Example.Core" line-rate="1" branch-rate="1" /><class name="Example.Core/&lt;RunAsync&gt;d__0" line-rate="0" branch-rate="0" /></classes></package></packages></coverage>' -Encoding UTF8
+    Assert-Rejected { & $gate -ResultsDirectory $directory -PolicyPath $policy }
+    Set-Content -LiteralPath $coverage -Value '<coverage line-rate="1"><packages><package><classes><class name="Example.Core" line-rate="1" branch-rate="1" /><class name="Example.Core/&lt;RunAsync&gt;d__0" line-rate="1" branch-rate="1" /></classes></package></packages></coverage>' -Encoding UTF8
+    & $gate -ResultsDirectory $directory -PolicyPath $policy
     Set-Content -LiteralPath $policy -Value '{"Missing.Class":{"line":0.9,"branch":0.8}}' -Encoding UTF8
     Assert-Rejected { & $gate -ResultsDirectory $directory -PolicyPath $policy }
     Write-Host 'Quality gate negative checks passed.'
