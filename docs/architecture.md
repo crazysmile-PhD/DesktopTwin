@@ -9,6 +9,7 @@
 | `MainWindow` / `MainWindowViewModel` | 显示、命令、用户提示和服务组装 |
 | `WpfDesktopSessionView` / `RdpSessionClient` | 将具体窗口与原生控件适配到 UI 无关的会话端口 |
 | `DesktopSessionHost` | 延迟创建一个视窗，配置初值、转发事件并负责关闭前解除订阅 |
+| `AccountCredentialStore` | 无平台依赖的账户密码策略，使用注入的保护函数和保存通知；更新时发布新密文表 |
 | `TrayIconController` | 托盘菜单与具体窗口的呈现交互，属于 View 层 |
 | `ChildSessionService` | 子会话连接、注销、设置重连、状态发布 |
 | `RdpActiveXHost` | MsRdpClient10 COM 配置、回调和控件层排队重连 |

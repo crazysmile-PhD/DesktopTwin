@@ -223,6 +223,8 @@ public sealed class AutomationSettings
     /// </summary>
     public string? AutoLoginUserName { get; set; }
 
+    private volatile Dictionary<string, string> _autoLoginPasswords = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// 各账户的自动登录密码：键是用户名（不区分大小写），值是 DPAPI 加密后的 Base64。
     ///
@@ -234,8 +236,13 @@ public sealed class AutomationSettings
     /// DPAPI 是 CurrentUser 作用域：这份数据只有当前 Windows 账户能解开，
     /// 拷到别的机器或别的账户下都无效。
     /// </summary>
-    public Dictionary<string, string> AutoLoginPasswords { get; set; } =
-        new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> AutoLoginPasswords
+    {
+        // Publish fully initialized replacement tables to background readers.
+        // Runtime writers must replace the table rather than mutate a published snapshot.
+        get => _autoLoginPasswords;
+        set => _autoLoginPasswords = value;
+    }
 
     /// <summary>
     /// 仅用于把 0.2.3 测试版的「单账户密码」搬到 <see cref="AutoLoginPasswords"/>。

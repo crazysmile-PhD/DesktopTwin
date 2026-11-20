@@ -46,7 +46,7 @@ jobs:
         run: |
           dotnet build DesktopTwin.sln -c Debug --no-restore -warnaserror
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test DesktopTwin.sln -c Debug --no-build --no-restore --blame-hang-timeout 2m
+          dotnet test DesktopTwin.sln -c Debug --no-build --no-restore --blame-hang-timeout 2m --results-directory artifacts/debug-test-results --logger "trx;LogFileName=tests.trx" --logger "console;verbosity=normal"
 
       - name: 编译（Release，警告视为错误）
         run: dotnet build DesktopTwin.sln -c Release --no-restore -warnaserror
@@ -72,7 +72,7 @@ jobs:
       - name: 核心覆盖率、零跳过和零空测试门禁
         run: ./build/verify-test-results.ps1 -ResultsDirectory artifacts/test-results
 
-      - name: 发布门禁：架构与资源所有权
+      - name: 发布门禁：已登记的重构契约
         run: ./build/verify-release-gates.ps1 -ResultsDirectory artifacts/test-results
 
       - name: 上传测试及完整应用覆盖率报告
@@ -80,7 +80,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quality-reports
-          path: artifacts/test-results
+          path: |
+            artifacts/test-results
+            artifacts/debug-test-results
           if-no-files-found: error
           retention-days: 14
 
