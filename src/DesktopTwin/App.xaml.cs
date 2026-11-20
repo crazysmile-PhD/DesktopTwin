@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,10 +37,12 @@ public partial class App : Application
     private bool _ownsSingleInstanceMutex;
     private EventWaitHandle? _activateEvent;
     private RegisteredWaitHandle? _activateRegistration;
+    private readonly long _startupTick = Stopwatch.GetTimestamp();
 
     /// <inheritdoc />
     protected override void OnStartup(StartupEventArgs e)
     {
+        using var timing = new PerformanceTrace("应用初始化（OnStartup）");
         base.OnStartup(e);
 
         // 命令行入口要先处理：它只生成语言模板，不该走到单实例检查（否则已有实例在跑时
@@ -104,9 +107,6 @@ public partial class App : Application
 
         StartActivationListener();
 
-        // 上一次异常退出可能留下临时计划任务，启动时在后台清扫，不阻塞界面。
-        _ = Task.Run(ChildSessionProcessLauncher.SweepOrphanTasks);
-
         _settings = new SettingsService();
 
         // 深扫义务跨重启保持：上次没跑完一次干净的完整深扫时，这次启动接着深扫。
@@ -135,12 +135,23 @@ public partial class App : Application
 
         // 窗口由服务按需创建（首次显示或首次连接时），这里只负责触发显示，
         // 避免出现「服务持有一个窗口、App 又建了一个窗口」的重复实例。
-        _childSessionService.ShowWindow();
+        using (new PerformanceTrace("主窗口构造与显示"))
+            _childSessionService.ShowWindow();
         _mainWindow = _childSessionService.Window;
         MainWindow = _mainWindow;
+        if (_mainWindow is not null)
+            _mainWindow.ContentRendered += OnFirstContentRendered;
 
         // 托盘图标常驻：窗口被隐藏后，这是唯一能把它叫回来的入口。
         _trayIcon = new TrayIconService(_childSessionService);
+    }
+
+    private void OnFirstContentRendered(object? sender, EventArgs e)
+    {
+        if (sender is Window window) window.ContentRendered -= OnFirstContentRendered;
+        AppLog.Info($"性能计时：App 创建至首帧 = {Stopwatch.GetElapsedTime(_startupTick).TotalMilliseconds:F0} ms");
+        // 首帧之后再启动后台 COM 清扫，避免冷启动时与界面争用磁盘及运行时初始化。
+        _ = Task.Run(ChildSessionProcessLauncher.SweepOrphanTasks);
     }
 
     /// <summary>
@@ -169,6 +180,7 @@ public partial class App : Application
     /// <inheritdoc />
     protected override void OnExit(ExitEventArgs e)
     {
+        using var timing = new PerformanceTrace("退出资源清理（OnExit）");
         AppLog.Info("DesktopTwin 退出");
 
         // 托盘先释放：它会订阅服务的状态事件，服务释放后回调会打到已失效的对象上。

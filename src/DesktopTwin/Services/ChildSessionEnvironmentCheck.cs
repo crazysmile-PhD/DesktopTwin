@@ -122,6 +122,30 @@ public static partial class ChildSessionEnvironmentCheck
     {
         var issues = new List<Issue>();
 
+        CollectConnectionIssues(issues);
+        CollectToolPersistenceIssue(issues);
+        CollectTermsrvIssue(issues);
+
+        // 运行时结论放在最后：它依赖上面那些项有没有已经能解释失败的原因。
+        CollectCredentialIssue(issues, includeCredentialHint);
+
+        return issues;
+    }
+
+    /// <summary>
+    /// 连接前的必要预检。保留全部阻塞项与廉价提示，不扫描计划任务、启动项或运行 sfc。
+    /// 完整诊断仍由诊断面板按需采集；未扫描不能被描述为完整环境正常。
+    /// </summary>
+    internal static IReadOnlyList<Issue> CollectForConnection()
+    {
+        var issues = new List<Issue>();
+        CollectConnectionIssues(issues);
+        return issues;
+    }
+
+    private static void CollectConnectionIssues(List<Issue> issues)
+    {
+
         CollectEditionIssue(issues);
         CollectChildSessionApiIssue(issues);
         CollectTermServiceIssue(issues);
@@ -129,17 +153,9 @@ public static partial class ChildSessionEnvironmentCheck
         CollectPasswordLessIssue(issues);
         CollectRdpWrapperIssue(issues);
 
-        // RDP 破解工具的残渣：放在最后，保证「服务起不来」这类根因结论排在前面。
         CollectServiceDllTypeIssue(issues);
         CollectServiceKeyIssue(issues);
-        CollectToolPersistenceIssue(issues);
         CollectRdpSecurityIssue(issues);
-        CollectTermsrvIssue(issues);
-
-        // 运行时结论放在最后：它依赖上面那些项有没有已经能解释失败的原因。
-        CollectCredentialIssue(issues, includeCredentialHint);
-
-        return issues;
     }
 
     /// <summary>

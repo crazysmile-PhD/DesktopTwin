@@ -1,4 +1,4 @@
-﻿# 本地打包脚本
+# 本地打包脚本
 #
 # 用法：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File build/build.ps1
@@ -64,8 +64,8 @@ function Publish-Variant {
 
     if ($SelfContained) {
         $publishArgs += @("--self-contained", "true")
-        # 压缩只在自带运行时时可用，框架依赖模式下 dotnet 会直接报 NETSDK1176
-        $publishArgs += @("-p:EnableCompressionInSingleFile=true")
+        # 优先启动速度：压缩单文件会增加启动时的程序集解压工作。
+        $publishArgs += @("-p:EnableCompressionInSingleFile=false")
     }
     else {
         $publishArgs += @("--self-contained", "false")

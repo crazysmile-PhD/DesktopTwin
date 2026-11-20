@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.IO;
 using System.Reflection;
@@ -98,6 +98,8 @@ public sealed class ChildSessionService : IDisposable
     private CancellationTokenSource _sessionCancellation = new();
     private bool _sessionClosing;
     private Task? _logoffOperation;
+    private Task<uint?>? _logoffRequest;
+    private bool _exitRequested;
     private SessionViewState? _publishedState;
     private long? _environmentCheckedTick;
 
@@ -489,6 +491,7 @@ public sealed class ChildSessionService : IDisposable
     private async Task StartCoreAsync(int? expectedGeneration)
     {
         ThrowIfDisposed();
+        using var timing = new PerformanceTrace("启动分身（预检至登录结果，含重试/取消）");
 
         // 等待期间被注销（用户关掉了桌面分身）：直接放弃，不能把它再建回来。
         if (expectedGeneration is { } expected && expected != StartGeneration)
@@ -503,8 +506,7 @@ public sealed class ChildSessionService : IDisposable
         if (ConnectedState == 1 && ChildSessionId is { } connectedId
             && ChildSessionNativeMethods.IsSessionActive(connectedId)) return;
 
-        // 预检可能读上千个计划任务 XML（深扫还要读内容）。这里已经跑在 UI 线程上了，
-        // 直接调用会把界面卡住，所以扔到后台再回来。
+        // 连接只做必要预检；计划任务与系统文件完整性留给完整诊断。
         //
         // 结果先放在局部变量里：被注销取代的那次启动不能把结果写进共享字段，
         // 否则会覆盖掉新一次启动刚发布的结论。
@@ -517,7 +519,7 @@ public sealed class ChildSessionService : IDisposable
         // 已有会话的重连不重复跑完整诊断；新建前仍采集一次。
         var issues = ChildSessionId is null
             && (_environmentCheckedTick is not { } checkedAt || Environment.TickCount64 - checkedAt > 30_000)
-            ? await Task.Run(() => ChildSessionEnvironmentCheck.Collect()).ConfigureAwait(true)
+            ? await Task.Run(() => ChildSessionEnvironmentCheck.CollectForConnection()).ConfigureAwait(true)
             : _environmentIssues;
 
         // 预检期间可能被注销或释放。那之后不能再改系统状态、更不能把会话建回来。
@@ -1008,12 +1010,41 @@ public sealed class ChildSessionService : IDisposable
         if (!_dispatcher.CheckAccess())
             return _dispatcher.InvokeAsync(() => LogoffAndHideAsync(expectedSessionId)).Task.Unwrap();
         if (_logoffOperation is { IsCompleted: false } running) return running;
+        _logoffRequest = null;
         return _logoffOperation = LogoffCoreAsync(expectedSessionId);
+    }
+
+    /// <summary>
+    /// 退出只等待 Windows 接受注销请求，系统继续清理；不等待最多 15 秒的完成观察。
+    /// 如果已有注销在途，共用它的下发信号，不能再发送第二次注销。
+    /// </summary>
+    internal async Task RequestLogoffForExitAsync()
+    {
+        ThrowIfDisposed();
+        if (!_dispatcher.CheckAccess())
+        {
+            await _dispatcher.InvokeAsync(RequestLogoffForExitAsync).Task.Unwrap();
+            return;
+        }
+
+        _exitRequested = true;
+        var completion = LogoffAndHideAsync();
+        // 完成观察可能仍在运行。退出路径负责消费它的异常，避免留下未观察的失败任务。
+        _ = ObserveExitLogoffAsync(completion);
+        await (_logoffRequest is { } request ? request : completion);
+    }
+
+    private static async Task ObserveExitLogoffAsync(Task completion)
+    {
+        try { await completion; }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { AppLog.Warn("退出时未确认分身注销完成。", exception); }
     }
 
     private async Task LogoffCoreAsync(uint? expectedSessionId)
     {
         ThrowIfDisposed();
+        using var timing = new PerformanceTrace("分身注销（下发与完成观察）");
         var activeSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
         if (expectedSessionId is { } expected && activeSessionId is { } active && active != expected)
             throw new InvalidOperationException(Locale.Format("Svc.Status.SessionChanged", expected, active));
@@ -1033,18 +1064,18 @@ public sealed class ChildSessionService : IDisposable
             TryDisconnectRdpHost();
             RefreshState(Locale.Get("Svc.Status.LoggingOff"));
 
-            var terminatedSessionId = (expectedSessionId ?? activeSessionId) is { } targetSessionId
-                ? await Task.Run(() => ChildSessionNativeMethods.TerminateChildSession(targetSessionId, wait: false))
-                : (uint?)null;
-            // WTS 只下发注销请求；用有界的异步等待观察完成，避免同步 WTS 等待挂住退出。
-            var deadline = Environment.TickCount64 + 15_000;
-            while (terminatedSessionId is { } closingId
-                && ChildSessionNativeMethods.TryGetChildSessionId() == closingId)
-            {
-                if (Environment.TickCount64 >= deadline)
-                    throw new TimeoutException("Windows 仍在注销分身会话，请稍后重试。");
-                await Task.Delay(200, _disposeCancellationTokenSource.Token);
-            }
+            _logoffRequest = (expectedSessionId ?? activeSessionId) is { } targetSessionId
+                ? Task.Run(() =>
+                {
+                    using var requestTiming = new PerformanceTrace("Windows 注销请求下发");
+                    return ChildSessionNativeMethods.TerminateChildSession(targetSessionId, wait: false);
+                })
+                : Task.FromResult<uint?>(null);
+            var operation = new SessionLogoffOperation(_logoffRequest,
+                ChildSessionNativeMethods.TryGetChildSessionId, TimeSpan.FromSeconds(15),
+                _disposeCancellationTokenSource.Token);
+            await operation.Completion;
+            var terminatedSessionId = await operation.Request;
             _desktopWindow?.Hide();
             RefreshState(terminatedSessionId is null
                 ? Locale.Get("Svc.Status.NoSessionHidden")
@@ -1052,7 +1083,7 @@ public sealed class ChildSessionService : IDisposable
         }
         finally
         {
-            _sessionClosing = false;
+            _sessionClosing = _exitRequested;
         }
     }
 
@@ -1179,7 +1210,7 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 采集并发布一次环境预检。
+    /// 采集并发布一次连接预检（全部阻塞项，不含完整诊断扫描）。
     ///
     /// 返回的 Task 在结果**真正发布之后**才完成：调用方紧接着就要读
     /// <see cref="HasBlockingEnvironmentIssue"/> 做启动决策，发布若只是排进队列
@@ -1197,7 +1228,8 @@ public sealed class ChildSessionService : IDisposable
             generation = ++_environmentGeneration;
         }
 
-        var issues = await Task.Run(() => ChildSessionEnvironmentCheck.Collect()).ConfigureAwait(false);
+        using var timing = new PerformanceTrace("连接必要预检");
+        var issues = await Task.Run(() => ChildSessionEnvironmentCheck.CollectForConnection()).ConfigureAwait(false);
         await PublishEnvironmentIssuesIfCurrent(issues, generation).ConfigureAwait(false);
     }
 
@@ -1218,6 +1250,7 @@ public sealed class ChildSessionService : IDisposable
 
         void Publish()
         {
+            if (_disposed) return;
             lock (_environmentGate)
             {
                 // 只有比「已经发布过的」更旧才丢弃。写成一味要求等于当前代际的话，
@@ -1311,10 +1344,13 @@ public sealed class ChildSessionService : IDisposable
         {
             // 应用正在退出，注销失败不应阻止主程序关闭；但会话残留会占着第二个桌面，必须尝试。
             // 带上当前会话号：若期间会话已被重建，宁可残留也不要误注销别人的会话。
-            var sessionId = ChildSessionNativeMethods.TryGetChildSessionId();
-            _ = sessionId is null
-                ? ChildSessionNativeMethods.TerminateChildSession(wait: false)
-                : ChildSessionNativeMethods.TerminateChildSession(sessionId.Value, wait: false);
+            if (!_exitRequested || _logoffRequest is not { IsCompletedSuccessfully: true })
+            {
+                var sessionId = ChildSessionNativeMethods.TryGetChildSessionId();
+                _ = sessionId is null
+                    ? ChildSessionNativeMethods.TerminateChildSession(wait: false)
+                    : ChildSessionNativeMethods.TerminateChildSession(sessionId.Value, wait: false);
+            }
         }
         catch (Exception exception) when (IsExpectedChildSessionException(exception))
         {
