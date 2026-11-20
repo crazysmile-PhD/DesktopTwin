@@ -106,11 +106,6 @@ public sealed class SessionSettings
     public bool SmartSizing { get; set; }
 
     /// <summary>
-    /// 拖动窗口边缘时是否保持 16:9 宽高比。
-    /// </summary>
-    public bool KeepAspectRatio { get; set; } = true;
-
-    /// <summary>
     /// Alt+Tab、Windows 键等系统组合键是否发送到分身。切换需重连 RDP。
     /// </summary>
     public bool SendSystemShortcutsToRemote { get; set; } = true;

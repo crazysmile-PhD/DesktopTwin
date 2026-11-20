@@ -451,15 +451,15 @@ public partial class MainWindow : FluentWindow
         WindowTitleBar.Visibility = Visibility.Collapsed;
         TitleRow.Height = new GridLength(0);
 
-        // 去掉 RDP 宿主的 3px 边距。
+        // 全屏不需要窗口边缘的 3px 拖拽命中区，画面布局仍由 DesktopViewport 负责。
         //
         // 那 3px 是给窗口边缘拖拽留的命中区（样式里只在 Maximized 时才归零），
         // 而全屏时窗口状态是 Normal，样式给的仍是 3,0,3,3——
         // 于是画面比屏幕窄 6px、矮 3px。此时就算分辨率完全一致，
         // 自适应缩放也会做一次非整数重采样（例如 2560 → 2554），画面必然发虚。
         // 全屏下没有边框可拖，这个边距只会帮倒忙。
-        RdpFormsHost.ClearValue(FrameworkElement.MarginProperty);
-        RdpFormsHost.Margin = new Thickness(0);
+        RdpViewport.ClearValue(FrameworkElement.MarginProperty);
+        RdpViewport.Margin = new Thickness(0);
 
         // 通知条贴在画面顶端（正常模式下在标题栏下方）。
         NotificationPopup.VerticalOffset = FullscreenNotificationOffset;
@@ -504,7 +504,7 @@ public partial class MainWindow : FluentWindow
             TitleRow.Height = GridLength.Auto;
 
             // 还原样式里给 RDP 宿主留的 3px 命中区（全屏时被清成 0 了）。
-            RdpFormsHost.ClearValue(FrameworkElement.MarginProperty);
+            RdpViewport.ClearValue(FrameworkElement.MarginProperty);
 
             SetCurrentValue(TopmostProperty, _settings.Current.Session.Topmost);
 
@@ -584,9 +584,9 @@ public partial class MainWindow : FluentWindow
     /// <summary>
     /// 全屏时决定缩放模式与黑边，三条规则按顺序判定：
     ///
-    /// 1. 屏幕正好等于分身分辨率 → 1:1 铺满，两项设置都不看；
+    /// 1. 屏幕正好等于分身分辨率 → 1:1 铺满；
     /// 2. 屏幕长宽都 ≥ 分身分辨率，且用户关掉了「自适应缩放」→ 1:1 居中，四周黑边；
-    /// 3. 其余（屏幕比分身小，或用户开着自适应）→ 自适应缩放，是否留黑边看「保持宽高比」。
+    /// 3. 其余（屏幕比分身小，或用户开着自适应）→ 等比自适应缩放。
     ///
     /// 都只改运行时行为，不写设置，退出全屏时还原用户原本的选择。
     /// 这里用传进来的显示器尺寸算，不读窗口的 Width/Height——调用方是先定缩放再改窗口尺寸的。
@@ -606,7 +606,7 @@ public partial class MainWindow : FluentWindow
         if (desktopWidth == monitorWidth && desktopHeight == monitorHeight)
         {
             _childSessionService.SetSmartSizing(false, persist: false);
-            RdpFormsHost.Margin = new Thickness(0);
+            RdpViewport.Margin = new Thickness(0);
             return;
         }
 
@@ -624,59 +624,17 @@ public partial class MainWindow : FluentWindow
             var contentHeight = desktopHeight / dpi.DpiScaleY;
             var insetX = Math.Max(0d, (areaWidth - contentWidth) / 2);
             var insetY = Math.Max(0d, (areaHeight - contentHeight) / 2);
-            RdpFormsHost.Margin = new Thickness(insetX, insetY, insetX, insetY);
+            RdpViewport.Margin = new Thickness(insetX, insetY, insetX, insetY);
             return;
         }
 
-        // 规则 3：自适应缩放，黑边看「保持宽高比」。
-        // 目标比例取分身桌面的实际比例，不能写死 16:9——DesktopTwin 的桌面分辨率是可配的，
-        // 用户设成 1920x1200（16:10）时按 16:9 留边会把画面裁坏。
+        // 规则 3：DesktopViewport 与窗口模式共用等比布局。
         _childSessionService.SetSmartSizing(true, persist: false);
-        ApplyFullscreenLetterbox(areaWidth, areaHeight, (double)desktopWidth / desktopHeight);
+        RdpViewport.Margin = new Thickness(0);
 
         // 只有真的退到自适应缩放时才提示模糊——这是唯一会让人察觉画面变差的场景。
         // 提示走 Popup（独立窗口），所以画在外层桌面、浮在分身画面之上，不会被 RDP 画面盖住。
         NotifyResolutionMismatch();
-    }
-
-    /// <summary>
-    /// 全屏下按「保持宽高比」给 RDP 画面留黑边：画面是 16:9，显示器不是时把控件缩到
-    /// 居中的 16:9 矩形里，四周露出窗口的黑色背景。缩的是控件本身，RDP 的鼠标坐标映射
-    /// 仍是「远端 16:9 → 控件 16:9」的等比关系，不会错位。
-    /// </summary>
-    private void ApplyFullscreenLetterbox(double areaWidth, double areaHeight, double targetRatio)
-    {
-        if (!_settings.Current.Session.KeepAspectRatio
-            || areaWidth <= 0
-            || areaHeight <= 0
-            || !double.IsFinite(targetRatio)
-            || targetRatio <= 0)
-        {
-            RdpFormsHost.Margin = new Thickness(0);
-            return;
-        }
-
-        var areaRatio = areaWidth / areaHeight;
-        if (Math.Abs(areaRatio - targetRatio) < 0.001)
-        {
-            RdpFormsHost.Margin = new Thickness(0);
-            return;
-        }
-
-        if (areaRatio > targetRatio)
-        {
-            // 显示器比 16:9 宽：左右留黑边。
-            var contentWidth = areaHeight * targetRatio;
-            var sideInset = (areaWidth - contentWidth) / 2;
-            RdpFormsHost.Margin = new Thickness(sideInset, 0, sideInset, 0);
-        }
-        else
-        {
-            // 显示器比 16:9 高（16:10、4:3）：上下留黑边。
-            var contentHeight = areaWidth / targetRatio;
-            var verticalInset = (areaHeight - contentHeight) / 2;
-            RdpFormsHost.Margin = new Thickness(0, verticalInset, 0, verticalInset);
-        }
     }
 
     private IntPtr OnWindowMessage(

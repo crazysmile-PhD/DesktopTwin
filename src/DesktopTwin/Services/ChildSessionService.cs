@@ -104,7 +104,7 @@ public sealed class ChildSessionService : IDisposable
     private long? _environmentCheckedTick;
 
     private readonly record struct SessionViewState(string Text, uint? SessionId, int Connection,
-        bool Visible, bool Topmost, bool SmartSizing, bool AspectRatio, bool Shortcuts,
+        bool Visible, bool Topmost, bool SmartSizing, bool Shortcuts,
         bool Muted, bool WatchMode, bool RelativeMouse, DrawingSize Size);
 
     /// <summary>
@@ -255,11 +255,6 @@ public sealed class ChildSessionService : IDisposable
     /// 画面是否自适应窗口。
     /// </summary>
     public bool SmartSizingEnabled => _settings.Current.Session.SmartSizing;
-
-    /// <summary>
-    /// 是否保持宽高比。
-    /// </summary>
-    public bool KeepAspectRatio => _settings.Current.Session.KeepAspectRatio;
 
     /// <summary>
     /// 分身声音是否关闭。
@@ -710,17 +705,6 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 切换是否保持宽高比。
-    /// </summary>
-    public void SetKeepAspectRatio(bool enabled)
-    {
-        ThrowIfDisposed();
-        _settings.Current.Session.KeepAspectRatio = enabled;
-        _settings.SaveSoon();
-        RefreshState(enabled ? Locale.Get("Svc.Status.KeepAspect") : Locale.Get("Svc.Status.NoAspect"));
-    }
-
-    /// <summary>
     /// 切换窗口置顶。
     /// </summary>
     public void SetTopmost(bool enabled)
@@ -1024,7 +1008,7 @@ public sealed class ChildSessionService : IDisposable
         }
 
         var state = new SessionViewState(StatusText, ChildSessionId, ConnectedState, IsDesktopVisible,
-            TopmostEnabled, SmartSizingEnabled, KeepAspectRatio, SendSystemShortcutsToRemote,
+            TopmostEnabled, SmartSizingEnabled, SendSystemShortcutsToRemote,
             AudioMuted, WatchModeEnabled, RelativeMouseModeEnabled, DesktopSize);
         if (_publishedState != state)
         {

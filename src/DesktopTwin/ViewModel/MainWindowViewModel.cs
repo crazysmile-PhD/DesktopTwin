@@ -68,9 +68,6 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _isAdaptive = true;
 
     [ObservableProperty]
-    private bool _keepAspectRatio = true;
-
-    [ObservableProperty]
     private WindowPosition? _normalWindowPosition;
 
     [ObservableProperty]
@@ -147,7 +144,6 @@ public partial class MainWindowViewModel : ObservableObject
 
         _isTopmost = childSessionService.TopmostEnabled;
         _isAdaptive = childSessionService.SmartSizingEnabled;
-        _keepAspectRatio = childSessionService.KeepAspectRatio;
         _normalWindowPosition = childSessionService.NormalWindowPosition;
         _smallWindowPosition = childSessionService.SmallWindowPosition;
         _sendSystemShortcutsToRemote = childSessionService.SendSystemShortcutsToRemote;
@@ -270,8 +266,7 @@ public partial class MainWindowViewModel : ObservableObject
         $"{_settings.Current.Session.DesktopWidth} × {_settings.Current.Session.DesktopHeight}";
 
     /// <summary>
-    /// 分身桌面的宽高比。窗口锁定与全屏黑边都按它算——DesktopTwin 的分辨率可配，
-    /// 用户设成 1920×1200 时窗口就该锁 16:10，不能沿用固定的 16:9。
+    /// 分身桌面的宽高比。画面布局与小窗尺寸都按设定分辨率计算。
     /// </summary>
     public double DesktopAspectRatio
     {
@@ -1069,17 +1064,6 @@ public partial class MainWindowViewModel : ObservableObject
         SmallWindowResizeRequest++;
     }
 
-    [RelayCommand]
-    private void ToggleKeepAspectRatio()
-    {
-        if (!Execute(() => _childSessionService.SetKeepAspectRatio(!KeepAspectRatio)))
-        {
-            return;
-        }
-
-        KeepAspectRatio = _childSessionService.KeepAspectRatio;
-    }
-
     [RelayCommand(CanExecute = nameof(CanToggleSendSystemShortcutsToRemote))]
     private void ToggleSendSystemShortcutsToRemote()
     {
@@ -1539,7 +1523,6 @@ public partial class MainWindowViewModel : ObservableObject
         var childSessionId = _childSessionService.ChildSessionId;
         IsTopmost = _childSessionService.TopmostEnabled;
         IsAdaptive = _childSessionService.SmartSizingEnabled;
-        KeepAspectRatio = _childSessionService.KeepAspectRatio;
         SendSystemShortcutsToRemote = _childSessionService.SendSystemShortcutsToRemote;
         IsWatchModeEnabled = _childSessionService.WatchModeEnabled;
         IsAudioMuted = _childSessionService.AudioMuted;

@@ -9,11 +9,18 @@
 | `MainWindow` / `MainWindowViewModel` | 显示、命令、用户提示和服务组装 |
 | `ChildSessionService` | 子会话连接、注销、设置重连、状态发布 |
 | `RdpActiveXHost` | MsRdpClient10 COM 配置、回调和控件层排队重连 |
+| `DesktopViewport` | 按桌面分辨率在可用区域内等比居中安排原生 RDP 宿主，窗口与全屏共用布局 |
 | `ChildSessionProcessLauncher` / `SessionLaunchWorker` | 临时任务只引导独立启动代理进入指定会话；清理后授权启动并核对回执 |
 | `ChildSessionEnvironmentCheck` / `EnvironmentFixer` | 诊断采集与显式系统修复 |
 | `AsyncSnapshotRefresh<T>` | 合并界面的异步采集请求，丢弃过期/关闭后的结果 |
 
 会话服务直接持有窗口；这不是严格单向依赖架构。它同时保留服务层和控件层重试，仍有继续收敛的空间。
+
+## 画面布局
+
+`DesktopViewport` 根据 `DesktopAspectRatio` 测量并安排 `WindowsFormsHost` 的实际矩形，不使用视觉变换缩放原生 HWND。窗口贴边、调整尺寸、隐藏恢复及分辨率变更均由 WPF 布局重新计算；多余空间露出父容器的黑色背景，不再改写系统分屏给出的外层窗口尺寸。比例固定跟随分身分辨率，旧版 `KeepAspectRatio` 设置不再参与运行。
+
+`SmartSizing` 继续控制 RDP 内部的自适应重采样或 1:1 显示。全屏只管理显示器边界、临时缩放设置和 1:1 居中所需的边距，等比布局与窗口模式共用。布局测试核对半屏、宽屏、自定义比例、分辨率切换、隐藏恢复和未连接 ActiveX 的实际 HWND 边界；已连接会话的渲染与游戏鼠标仍需单独验证。
 
 ## 连接
 
