@@ -1565,6 +1565,12 @@ public sealed class ChildSessionService : IDisposable
         {
             // 注销撤销排队或尚未下发的启动，不再向新会话发布结果。
         }
+        catch (Exception error) when (IsExpectedChildSessionException(error))
+        {
+            if (!_disposed && generation == StartGeneration)
+                RefreshState(Locale.Format("Svc.Status.LaunchUnconfirmed", error.Message));
+            throw;
+        }
         finally
         {
             _launchSemaphore.Release();
@@ -2048,7 +2054,8 @@ public sealed class ChildSessionService : IDisposable
             or TargetInvocationException
             or InvalidCastException
             or InvalidOperationException
-            or FileNotFoundException
+            or TimeoutException
+            or IOException
             or ArgumentException;
     }
 

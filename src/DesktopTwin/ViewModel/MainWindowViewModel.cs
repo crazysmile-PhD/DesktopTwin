@@ -1668,10 +1668,8 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>
     /// 分身连上时确保热键代理在跑。
     ///
-    /// 代理是否在线由 <see cref="SessionAgentService.IsAgentOnline"/> 判定，
-    /// 那里面已经含「刚拉起的 60 秒启动宽限」：分身端冷启动到第一条心跳要
-    /// 7～12 秒，没有宽限就会把正在启动的代理误判成「不在线」再拉一个新的，
-    /// 新代理又会杀掉旧的（自噬循环）。
+    /// 启动请求由代理服务合并；只有收到热键与消息循环就绪回执才记启动成功。
+    /// 后续在线状态仍由进程及心跳判断，不以启动宽限期伪造在线。
     /// </summary>
     private void OnAgentHealthCheckRequested(object? sender, EventArgs e) => EnsureSessionAgentRunning();
 

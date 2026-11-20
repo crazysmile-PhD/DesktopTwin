@@ -367,7 +367,8 @@ internal static class Strings
         Pair("Svc.Status.Off", "关"),
         Pair("Svc.Status.ReadyAutoLaunching", "分身已就绪，正在自动启动 {0}"),
         Pair("Svc.Status.Launching", "正在启动 {0}"),
-        Pair("Svc.Status.Launched", "已在分身（会话 {0}）中启动 {1}"),
+        Pair("Svc.Status.Launched", "已确认 {1} 的窗口可响应（分身会话 {0}）"),
+        Pair("Svc.Status.LaunchUnconfirmed", "启动未确认：{0}"),
         Pair("Svc.Status.LaunchedElevated", "（管理员权限）"),
         Pair("Svc.Error.NoSession", "当前没有可用的分身会话，请先启动桌面分身。"),
         Pair("Svc.Status.RdpSettingsApplied", "自动重新连接完成，RDP 设置已生效"),
@@ -415,7 +416,7 @@ internal static class Strings
         Pair("Agent.Error.ReleaseFailed", "释放分身端失败：{0}"),
         Pair("Agent.Error.UpdateRolledBack", "分身端更新失败，已回滚到旧版本（当前仍可正常使用，下次启动会重试）。"),
         Pair("Agent.Error.RunKeyFailed", "写自启项失败：{0}"),
-        Pair("Agent.Started", "已在分身会话 {0} 里启动分身端。"),
+        Pair("Agent.Started", "已确认分身会话 {0} 的代理热键及消息循环就绪。"),
         Pair("Agent.StartFailed", "在分身会话 {0} 里启动分身端失败，下次登录时由自启项兜底。"),
         Pair("Agent.EmbeddedMissing", "程序内没有找到内嵌的分身端（DesktopTwin.Agent.exe）。这是打包错误，请重新安装。"),
 

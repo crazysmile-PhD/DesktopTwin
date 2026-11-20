@@ -25,8 +25,8 @@ namespace DesktopTwinSessionAgent
     /// 3) 无脚本文件、无执行策略、无缓存文件争用。
     ///
     /// 协议与之前完全一致（文件 IPC）：
-    ///   命中热键 → 写 uu-switch-request.json（延迟 1.6 秒，先让用户看到提示）
-    ///   每 5 秒写 session-agent-heartbeat.txt（Unix 秒），启动时立刻写一次
+    ///   命中热键 → 立即写 uu-switch-request.json
+    ///   每 2 秒写 session-agent-heartbeat.txt（Unix 秒），启动时立刻写一次
     ///   日志 session-agent.log
     ///
     /// 注意：用 .NET Framework 4.x 的 csc 编译（Windows 自带，无需另装运行库），
@@ -57,6 +57,10 @@ namespace DesktopTwinSessionAgent
         [STAThread]
         private static int Main(string[] args)
         {
+            int parentId;
+            if (args.Length == 3 && args[0] == "--launch-worker" && int.TryParse(args[2], out parentId))
+                return SessionLaunchWorker.Run(args[1], parentId);
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Native.SetProcessDPIAware();
@@ -166,6 +170,23 @@ namespace DesktopTwinSessionAgent
             guard.Start();
 
             Log("进入消息循环");
+            // Acknowledgement comes from the actual message loop, after hotkey registration.
+            // An early heartbeat or a live process is insufficient evidence of readiness.
+            string readyEvent = null;
+            for (int index = 0; index + 1 < args.Length; index++)
+                if (args[index] == "--ready-event") readyEvent = args[index + 1];
+            EventHandler acknowledge = null;
+            acknowledge = delegate
+            {
+                if (!_registered || readyEvent == null) return;
+                Application.Idle -= acknowledge;
+                try
+                {
+                    using (var signal = EventWaitHandle.OpenExisting(readyEvent)) signal.Set();
+                }
+                catch (WaitHandleCannotBeOpenedException) { }
+            };
+            if (readyEvent != null) Application.Idle += acknowledge;
             Application.Run(new AgentContext());
             Log("消息循环退出，分身端结束");
             return 0;

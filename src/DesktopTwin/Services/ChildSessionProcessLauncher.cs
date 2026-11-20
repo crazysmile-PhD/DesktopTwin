@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Threading;
@@ -14,9 +15,8 @@ namespace DesktopTwin.Services;
 /// <summary>
 /// 把目标程序启动到指定的分身会话中。
 ///
-/// 为什么不能直接 <see cref="System.Diagnostics.Process.Start(string)"/>：
-/// 进程只能在自己所属的 Windows 会话里创建窗口，跨会话启动必须借道「任务计划程序」——
-/// 以交互令牌注册一次性任务，用 RunEx 指定目标会话运行，随后安排延迟清理。
+/// 用临时任务进入指定会话；连接独立代理后先删除并查验任务，再授权启动目标。
+/// 成功以目标窗口或代理消息循环的实际回执确认，不从 RunEx 返回值推断。
 /// </summary>
 public static class ChildSessionProcessLauncher
 {
@@ -25,19 +25,11 @@ public static class ChildSessionProcessLauncher
     /// </summary>
     private const string TaskNamePrefix = "DesktopTwin-SessionLaunch-";
 
-    /// <summary>
-    /// 清扫时要认的任务名前缀。
-    ///
-    /// 除了本类创建的 <see cref="TaskNamePrefix"/>，分身端代理用的
-    /// <c>DesktopTwin-SessionAgent-</c> 也是同一种一次性任务——
-    /// 不清扫的话，程序异常退出会让它们一直躺在任务计划程序里。
-    /// </summary>
-    private const string CommonTaskNamePrefix = "DesktopTwin-";
-
-    /// <summary>
-    /// 临时任务的延迟清理时间：要留够「任务真正拉起进程」的余量。
-    /// </summary>
-    private static readonly TimeSpan TaskCleanupDelay = TimeSpan.FromSeconds(45);
+    private static readonly object LaunchGate = new();
+    private static readonly HashSet<Task> ActiveLaunches = [];
+    private static readonly HashSet<string> PendingTasks = [];
+    private static readonly CancellationTokenSource ShutdownCancellation = new();
+    private static bool _stopping;
 
     /// <summary>
     /// 用户级 COM 注册所在的根路径。
@@ -94,12 +86,48 @@ public static class ChildSessionProcessLauncher
     {
         var fullPath = ValidateExecutablePath(executablePath);
         var workingDirectory = Path.GetDirectoryName(fullPath) ?? AppContext.BaseDirectory;
-        return Task.Run(() => LaunchWithTemporaryTask(
-            childSessionId,
-            fullPath,
-            arguments ?? string.Empty,
-            workingDirectory,
-            runAsAdministrator, cancellationToken: cancellationToken), cancellationToken);
+        return TrackLaunch(token => LaunchWithTemporaryTaskAsync(
+            childSessionId, fullPath, arguments ?? string.Empty, workingDirectory,
+            runAsAdministrator, agent: false, TaskNamePrefix, token,
+            ChildSessionNativeMethods.TryGetChildSessionId), cancellationToken);
+    }
+
+    private static Task TrackLaunch(Func<CancellationToken, Task> launch, CancellationToken token)
+    {
+        lock (LaunchGate)
+        {
+            if (_stopping) return Task.FromCanceled(new CancellationToken(true));
+            var linked = CancellationTokenSource.CreateLinkedTokenSource(token, ShutdownCancellation.Token);
+            var task = Task.Run(async () =>
+            {
+                using (linked) await launch(linked.Token).ConfigureAwait(false);
+            });
+            ActiveLaunches.Add(task);
+            _ = task.ContinueWith(completed =>
+            {
+                lock (LaunchGate) ActiveLaunches.Remove(completed);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return task;
+        }
+    }
+
+    /// <summary>正常退出先停止接收启动、取消等待并等待清理；不把清理遗留到下次启动。</summary>
+    internal static async Task StopAsync()
+    {
+        Task[] active;
+        lock (LaunchGate)
+        {
+            _stopping = true;
+            active = ActiveLaunches.ToArray();
+        }
+        ShutdownCancellation.Cancel();
+        try { await Task.WhenAll(active).ConfigureAwait(false); }
+        catch (Exception error) { AppLog.Warn("退出时收尾启动操作。", error); }
+        string[] pending;
+        lock (LaunchGate) pending = PendingTasks.ToArray();
+        // A failed earlier cleanup is retried now, even when the launch has already returned an error.
+        foreach (var name in pending)
+            await Task.Run(() => DeleteTemporaryTask(name)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -142,7 +170,7 @@ public static class ChildSessionProcessLauncher
     /// <summary>
     /// 清扫上一次异常退出遗留的临时计划任务。
     ///
-    /// 正常流程会延迟清理任务；如果主程序在清理之前退出，任务可能留在系统里。
+    /// 仅清扫旧版留下的任务；新版每次操作内同步清理，并配置系统到期回收。
     /// 这些残留任务带的是本程序的身份与目标程序路径，必须在下次启动时清掉。
     /// </summary>
     public static void SweepOrphanTasks()
@@ -175,10 +203,11 @@ public static class ChildSessionProcessLauncher
 
             foreach (var taskName in EnumerateTaskNames(rootFolder))
             {
-                if (!taskName.StartsWith(CommonTaskNamePrefix, StringComparison.Ordinal))
+                if (!IsOwnedTemporaryTask(taskName))
                 {
                     continue;
                 }
+                lock (LaunchGate) { if (PendingTasks.Contains(taskName)) continue; }
 
                 try
                 {
@@ -208,6 +237,13 @@ public static class ChildSessionProcessLauncher
             ReleaseComObject(rootFolderObject);
             ReleaseComObject(schedulerObject);
         }
+    }
+
+    internal static bool IsOwnedTemporaryTask(string name)
+    {
+        var prefix = name.StartsWith(TaskNamePrefix, StringComparison.Ordinal) ? TaskNamePrefix
+            : name.StartsWith("DesktopTwin-SessionAgent-", StringComparison.Ordinal) ? "DesktopTwin-SessionAgent-" : null;
+        return prefix is not null && Guid.TryParseExact(name[prefix.Length..], "N", out _);
     }
 
     private static string[] EnumerateTaskNames(dynamic rootFolder)
@@ -408,162 +444,119 @@ public static class ChildSessionProcessLauncher
         }
     }
 
-    /// <summary>
-    /// 在指定会话里启动内嵌代理。路径由代理安装服务提供，
-    /// 不经过用户目标程序的路径校验；下发前仍校验会话身份与取消标记。
-    /// </summary>
-    /// <returns>是否已成功下发启动任务。</returns>
-    internal static bool RunInSession(
-        uint sessionId,
-        string executablePath,
-        string arguments,
-        string taskNamePrefix,
-        CancellationToken cancellationToken = default)
+    /// <summary>代理必须回报热键注册和消息循环就绪后才返回成功。</summary>
+    internal static async Task<bool> RunInSessionAsync(uint sessionId, string executablePath,
+        string arguments, string taskNamePrefix, CancellationToken cancellationToken = default)
     {
         try
         {
-            LaunchWithTemporaryTask(
-                sessionId,
-                executablePath,
-                arguments,
-                Path.GetDirectoryName(executablePath) ?? string.Empty,
-                runAsAdministrator: false,
-                taskNamePrefix: taskNamePrefix,
-                cancellationToken: cancellationToken);
+            var path = ValidateExecutablePath(executablePath);
+            await TrackLaunch(token => LaunchWithTemporaryTaskAsync(sessionId, path, arguments,
+                Path.GetDirectoryName(path) ?? string.Empty, false, true, taskNamePrefix, token,
+                ChildSessionNativeMethods.TryGetChildSessionId),
+                cancellationToken).ConfigureAwait(false);
             return true;
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-                                              or COMException
-                                              or UnauthorizedAccessException
-                                              or System.Security.SecurityException
-                                              or IOException)
+        catch (Exception exception) when (exception is InvalidOperationException or COMException
+            or UnauthorizedAccessException or System.Security.SecurityException or IOException
+            or TimeoutException or System.ComponentModel.Win32Exception)
         {
-            AppLog.Warn("在分身会话里启动命令失败。", exception);
+            AppLog.Warn("在分身会话里启动代理未确认成功。", exception);
             return false;
         }
     }
 
-    private static void LaunchWithTemporaryTask(
-        uint childSessionId,
-        string executablePath,
-        string arguments,
-        string workingDirectory,
-        bool runAsAdministrator,
-        string? taskNamePrefix = null,
-        CancellationToken cancellationToken = default)
+    internal static async Task LaunchWithTemporaryTaskAsync(uint childSessionId, string executablePath,
+        string arguments, string workingDirectory, bool runAsAdministrator, bool agent,
+        string taskNamePrefix, CancellationToken cancellationToken, Func<uint?> getSessionId)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        // 会话可能在用户点击后被重建，启动前必须确认目标会话号仍然有效，
-        // 否则会把程序启动到一个已经注销的会话里（表现为「点了没反应」）。
-        var actualChildSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
-        if (actualChildSessionId != childSessionId)
+        void ValidateSession()
         {
-            throw new InvalidOperationException(
-                $"目标分身会话已发生变化。请求会话为 {childSessionId}，当前会话为 "
-                + (actualChildSessionId?.ToString(CultureInfo.InvariantCulture) ?? "无")
-                + "。");
+            cancellationToken.ThrowIfCancellationRequested();
+            if (getSessionId() != childSessionId)
+                throw new InvalidOperationException("目标分身会话已改变，放弃启动。");
         }
-
+        ValidateSession();
         EnsureTaskSchedulerIsTrusted();
-
-        var schedulerType = Type.GetTypeFromProgID("Schedule.Service")
-            ?? throw new InvalidOperationException("当前 Windows 未提供任务计划程序 COM 服务。");
-
-        var taskName = (taskNamePrefix ?? TaskNamePrefix) + Guid.NewGuid().ToString("N");
-        string accountName;
-        using (var currentIdentity = WindowsIdentity.GetCurrent())
-        {
-            accountName = currentIdentity.Name;
-        }
-
+        var workerPath = SessionLaunchChannel.EnsureWorkerInstalled();
+        using var channel = new SessionLaunchChannel(workerPath, childSessionId);
+        var taskName = taskNamePrefix + Guid.NewGuid().ToString("N");
+        using var identity = WindowsIdentity.GetCurrent();
+        var accountName = identity.Name;
         object? schedulerObject = null;
         object? rootFolderObject = null;
         object? taskDefinitionObject = null;
         object? actionObject = null;
+        object? triggerObject = null;
         object? registeredTaskObject = null;
         object? runningTaskObject = null;
-        var taskRegistered = false;
-
+        var registrationAttempted = false;
         try
         {
-            schedulerObject = Activator.CreateInstance(schedulerType)
-                ?? throw new InvalidOperationException("无法创建任务计划程序 COM 对象。");
-            dynamic scheduler = schedulerObject;
-            scheduler.Connect();
-
-            rootFolderObject = scheduler.GetFolder("\\");
-            dynamic rootFolder = rootFolderObject;
-            taskDefinitionObject = scheduler.NewTask(0);
-            dynamic taskDefinition = taskDefinitionObject;
-
-            taskDefinition.RegistrationInfo.Author = "DesktopTwin";
-            taskDefinition.RegistrationInfo.Description =
-                $"临时启动 {Path.GetFileName(executablePath)} 到分身会话 {childSessionId}";
-
-            taskDefinition.Settings.Enabled = true;
-            taskDefinition.Settings.Hidden = true;
-            taskDefinition.Settings.AllowDemandStart = true;
-            taskDefinition.Settings.DisallowStartIfOnBatteries = false;
-            taskDefinition.Settings.StopIfGoingOnBatteries = false;
-            taskDefinition.Settings.ExecutionTimeLimit = "PT0S";
-
-            taskDefinition.Principal.UserId = accountName;
-            taskDefinition.Principal.LogonType = TaskLogonInteractiveToken;
-            taskDefinition.Principal.RunLevel = runAsAdministrator
-                ? TaskRunLevelHighest
-                : TaskRunLevelLimited;
-
-            actionObject = taskDefinition.Actions.Create(TaskActionExecute);
-            dynamic action = actionObject;
-            action.Path = executablePath;
-            action.Arguments = arguments;
-            action.WorkingDirectory = workingDirectory;
-
-            cancellationToken.ThrowIfCancellationRequested();
-            registeredTaskObject = rootFolder.RegisterTaskDefinition(
-                taskName,
-                taskDefinition,
-                TaskCreate,
-                accountName,
-                null,
-                TaskLogonInteractiveToken,
-                null);
-            taskRegistered = true;
-
-            dynamic registeredTask = registeredTaskObject;
-            cancellationToken.ThrowIfCancellationRequested();
-            if (ChildSessionNativeMethods.TryGetChildSessionId() != childSessionId)
-                throw new InvalidOperationException("启动期间目标会话已改变，放弃执行。");
-            runningTaskObject = registeredTask.RunEx(
-                null,
-                TaskRunUseSessionId,
-                checked((int)childSessionId),
-                null);
-
-            if (runningTaskObject is null)
-            {
-                throw new InvalidOperationException("任务计划程序没有返回运行实例。");
-            }
-
-            AppLog.Info(
-                $"已在会话 {childSessionId} 中启动 {executablePath}"
-                + (runAsAdministrator ? "（管理员权限）" : "（普通权限）"));
+            await SessionLaunchTransaction.ExecuteAsync(
+                registerAndRun: () =>
+                {
+                    ValidateSession();
+                    var schedulerType = Type.GetTypeFromProgID("Schedule.Service")
+                        ?? throw new InvalidOperationException("当前 Windows 未提供任务计划程序 COM 服务。");
+                    schedulerObject = Activator.CreateInstance(schedulerType)
+                        ?? throw new InvalidOperationException("无法创建任务计划程序 COM 对象。");
+                    dynamic scheduler = schedulerObject;
+                    scheduler.Connect();
+                    rootFolderObject = scheduler.GetFolder("\\");
+                    dynamic rootFolder = rootFolderObject;
+                    taskDefinitionObject = scheduler.NewTask(0);
+                    dynamic definition = taskDefinitionObject;
+                    definition.RegistrationInfo.Author = "DesktopTwin";
+                    definition.RegistrationInfo.Description = $"临时启动代理进入分身会话 {childSessionId}";
+                    definition.Settings.Enabled = true;
+                    definition.Settings.Hidden = true;
+                    definition.Settings.AllowDemandStart = true;
+                    definition.Settings.DisallowStartIfOnBatteries = false;
+                    definition.Settings.StopIfGoingOnBatteries = false;
+                    definition.Settings.ExecutionTimeLimit = "PT0S";
+                    // Independent of the host's finally/exit handlers, including abrupt termination.
+                    // The disabled trigger supplies an expiry boundary, never another target launch.
+                    triggerObject = ConfigureTaskExpiry(taskDefinitionObject, DateTime.UtcNow, TimeSpan.FromMinutes(2));
+                    definition.Principal.UserId = accountName;
+                    definition.Principal.LogonType = TaskLogonInteractiveToken;
+                    definition.Principal.RunLevel = runAsAdministrator ? TaskRunLevelHighest : TaskRunLevelLimited;
+                    actionObject = definition.Actions.Create(TaskActionExecute);
+                    dynamic action = actionObject;
+                    action.Path = workerPath;
+                    action.Arguments = $"--launch-worker {channel.PipeName} {Environment.ProcessId}";
+                    action.WorkingDirectory = Path.GetDirectoryName(workerPath);
+                    ValidateSession();
+                    registrationAttempted = true;
+                    lock (LaunchGate) PendingTasks.Add(taskName);
+                    registeredTaskObject = rootFolder.RegisterTaskDefinition(taskName, definition, TaskCreate,
+                        accountName, null, TaskLogonInteractiveToken, null);
+                    ValidateSession();
+                    dynamic registeredTask = registeredTaskObject;
+                    runningTaskObject = registeredTask.RunEx(null, TaskRunUseSessionId,
+                        checked((int)childSessionId), null);
+                    if (runningTaskObject is null) throw new InvalidOperationException("未取得启动代理的任务实例。");
+                    return Task.CompletedTask;
+                },
+                connect: () => channel.ConnectAsync(cancellationToken),
+                deleteAndVerify: () =>
+                {
+                    if (registrationAttempted) DeleteTemporaryTask(taskName);
+                    return Task.CompletedTask;
+                },
+                launchAndConfirm: () =>
+                {
+                    // Last authorization point: the temporary task is already verified absent.
+                    ValidateSession();
+                    return channel.LaunchAndConfirmAsync(executablePath, arguments, workingDirectory,
+                        agent, cancellationToken);
+                }, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            if (taskRegistered)
-            {
-                // 不能在这里立刻删任务。
-                //
-                // RunEx 只是「登记运行」，进程真正起来有几秒延迟；任务计划程序在删除
-                // 任务定义时会连带终止它的运行实例——删得太快，刚拉起的进程会被掐掉。
-                // 实测表现：「已在会话 X 中启动」的日志有，但会话里根本没有进程，
-                // 三次拉起只有一次碰巧活下来。所以改成延迟清理，异常退出时留给下次启动清扫。
-                ScheduleTaskCleanup(taskName);
-            }
-
             ReleaseComObject(runningTaskObject);
             ReleaseComObject(registeredTaskObject);
+            ReleaseComObject(triggerObject);
             ReleaseComObject(actionObject);
             ReleaseComObject(taskDefinitionObject);
             ReleaseComObject(rootFolderObject);
@@ -571,65 +564,81 @@ public static class ChildSessionProcessLauncher
         }
     }
 
-    /// <summary>
-    /// 在后台延迟删除临时计划任务。
-    ///
-    /// 延迟期间目标进程已经稳定运行，此时删除任务不会影响它。
-    /// </summary>
-    /// <param name="taskName">要删除的任务名。</param>
-    private static void ScheduleTaskCleanup(string taskName)
+    internal static void DeleteTemporaryTask(string taskName)
     {
-        _ = Task.Run(async () =>
+        EnsureTaskSchedulerIsTrusted();
+        object? schedulerObject = null;
+        object? folderObject = null;
+        try
         {
-            try
+            var type = Type.GetTypeFromProgID("Schedule.Service")
+                ?? throw new InvalidOperationException("无法连接任务计划程序进行清理。");
+            schedulerObject = Activator.CreateInstance(type)
+                ?? throw new InvalidOperationException("无法创建清理任务的 COM 对象。");
+            dynamic scheduler = schedulerObject;
+            scheduler.Connect();
+            folderObject = scheduler.GetFolder("\\");
+            dynamic folder = folderObject;
+            Exception? lastError = null;
+            for (var attempt = 0; attempt < 4; attempt++)
             {
-                await Task.Delay(TaskCleanupDelay).ConfigureAwait(false);
-
-                var schedulerType = Type.GetTypeFromProgID("Schedule.Service");
-                if (schedulerType is null)
-                {
-                    return;
-                }
-
-                object? schedulerObject = null;
-                object? rootFolderObject = null;
                 try
                 {
-                    schedulerObject = Activator.CreateInstance(schedulerType);
-                    if (schedulerObject is null)
-                    {
-                        return;
-                    }
-
-                    dynamic scheduler = schedulerObject;
-                    scheduler.Connect();
-                    rootFolderObject = scheduler.GetFolder("\\");
-                    dynamic rootFolder = rootFolderObject;
-                    rootFolder.DeleteTask(taskName, 0);
+                    try { folder.DeleteTask(taskName, 0); }
+                    catch (Exception error) when (IsTaskNotFound(error)) { }
+                    if (TaskExists(folderObject, taskName))
+                        throw new InvalidOperationException("删除后任务仍然存在。");
+                    lock (LaunchGate) PendingTasks.Remove(taskName);
+                    AppLog.Info($"已删除并确认不存在的临时任务 {taskName}");
+                    return;
                 }
-                finally
+                catch (Exception error) when (error is COMException or InvalidOperationException or IOException
+                    or UnauthorizedAccessException)
                 {
-                    ReleaseComObject(rootFolderObject);
-                    ReleaseComObject(schedulerObject);
+                    lastError = error;
+                    if (attempt < 3) Thread.Sleep(100 * (attempt + 1));
                 }
             }
-            catch (Exception exception) when (exception is COMException
-                                                  or InvalidOperationException
-                                                  or UnauthorizedAccessException
-                                                  or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException
-                                                  or InvalidCastException)
-            {
-                // 删不掉不算错：下次启动 SweepOrphanTasks 会清掉。
-                AppLog.Warn($"延迟删除临时计划任务 {taskName} 失败，留给下次启动清扫。", exception);
-            }
-        });
+            throw new InvalidOperationException($"临时任务 {taskName} 清理失败，未授权目标启动。", lastError);
+        }
+        finally
+        {
+            ReleaseComObject(folderObject);
+            ReleaseComObject(schedulerObject);
+        }
     }
+
+    internal static object ConfigureTaskExpiry(object definitionObject, DateTime now, TimeSpan lifetime)
+    {
+        dynamic definition = definitionObject;
+        definition.Settings.DeleteExpiredTaskAfter = "PT0S";
+        object triggerObject = definition.Triggers.Create(1);
+        dynamic expiry = triggerObject;
+        expiry.StartBoundary = now.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+        expiry.EndBoundary = now.Add(lifetime).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+        expiry.Enabled = false;
+        return triggerObject;
+    }
+
+    private static bool TaskExists(object folderObject, string taskName)
+    {
+        object? task = null;
+        try
+        {
+            dynamic folder = folderObject;
+            task = folder.GetTask(taskName);
+            if (task is null) throw new IOException("任务计划程序未返回可核对的任务结果。");
+            return true;
+        }
+        catch (Exception error) when (IsTaskNotFound(error)) { return false; }
+        finally { ReleaseComObject(task); }
+    }
+
+    private static bool IsTaskNotFound(Exception error) =>
+        error.HResult is unchecked((int)0x80070002) or unchecked((int)0x80070003);
 
     private static void ReleaseComObject(object? value)
     {
-        if (value is not null && Marshal.IsComObject(value))
-        {
-            Marshal.FinalReleaseComObject(value);
-        }
+        if (value is not null && Marshal.IsComObject(value)) Marshal.FinalReleaseComObject(value);
     }
 }

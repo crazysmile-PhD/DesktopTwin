@@ -1239,7 +1239,7 @@ public partial class MainWindow : FluentWindow
         {
             if (!_childSessionService.HasActiveChildSession())
             {
-                ExitApplication();
+                await ExitApplicationAsync();
                 return;
             }
 
@@ -1252,6 +1252,11 @@ public partial class MainWindow : FluentWindow
             }
 
             await ExitImmediatelyAsync();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("退出未完成，临时任务清理必须先完成。", error);
+            await Dialogs.ErrorAsync(error.Message, Locale.Get("Main.Title"));
         }
         finally
         {
@@ -1271,23 +1276,25 @@ public partial class MainWindow : FluentWindow
     {
         if (_exitRequestInProgress) return;
         _exitRequestInProgress = true;
-        using var timing = new PerformanceTrace("退出（注销请求至应用关闭）");
-
-        if (DataContext is MainWindowViewModel viewModel)
-            viewModel.IsSessionClosing = true;
-
+        using var timing = new PerformanceTrace("退出（注销请求与启动任务清理至应用关闭）");
         try
         {
-            await _childSessionService.RequestLogoffForExitAsync();
+            if (DataContext is MainWindowViewModel viewModel)
+                viewModel.IsSessionClosing = true;
+            try { await _childSessionService.RequestLogoffForExitAsync(); }
+            catch (Exception exception) when (exception is InvalidOperationException
+                or System.ComponentModel.Win32Exception or ObjectDisposedException)
+            {
+                AppLog.Warn("退出时注销分身会话失败，仍尝试清理临时启动任务。", exception);
+            }
+            await ExitApplicationAsync();
         }
-        catch (Exception exception) when (exception is InvalidOperationException
-                                              or System.ComponentModel.Win32Exception
-                                              or ObjectDisposedException)
+        catch (Exception error)
         {
-            AppLog.Warn("退出时注销分身会话失败，仍继续退出。", exception);
+            AppLog.Error("退出未完成，临时任务清理必须先完成。", error);
+            await Dialogs.ErrorAsync(error.Message, Locale.Get("Main.Title"));
         }
-
-        ExitApplication();
+        finally { _exitRequestInProgress = false; }
     }
 
     /// <summary>
@@ -1298,8 +1305,9 @@ public partial class MainWindow : FluentWindow
     /// 而任务栏里又没有这个窗口——只能靠托盘图标或再启动一次唤回。
     /// 点 X 的语义就是退出，不该把进程留在后台。
     /// </summary>
-    private void ExitApplication()
+    private async Task ExitApplicationAsync()
     {
+        await ChildSessionProcessLauncher.StopAsync();
         // 放行 OnClosing 里的拦截，否则 Shutdown 关闭窗口时又会被当成用户点 X，再次弹确认框。
         AllowClose = true;
 

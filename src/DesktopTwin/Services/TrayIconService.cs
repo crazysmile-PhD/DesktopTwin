@@ -154,7 +154,7 @@ internal sealed class TrayIconService : IDisposable
         }
     }
 
-    private void OnExitClicked(object? sender, EventArgs e)
+    private async void OnExitClicked(object? sender, EventArgs e)
     {
         // 托盘里的「退出」按用户要求直接退出，不再弹确认框——
         // 托盘是常驻入口，用户点它就是要走，反复确认反而碍事。
@@ -162,11 +162,18 @@ internal sealed class TrayIconService : IDisposable
         var window = _childSessionService.Window;
         if (window is null)
         {
+            try { await ChildSessionProcessLauncher.StopAsync(); }
+            catch (Exception error)
+            {
+                AppLog.Error("退出时清理临时任务失败。", error);
+                await Dialogs.ErrorAsync(error.Message, Locale.Get("Main.Title"));
+                return;
+            }
             Application.Current?.Shutdown();
             return;
         }
 
-        _ = window.ExitImmediatelyAsync();
+        await window.ExitImmediatelyAsync();
     }
 
     private void OnStateChanged(object? sender, EventArgs e)
