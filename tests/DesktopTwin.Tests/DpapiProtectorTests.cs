@@ -14,7 +14,7 @@ public sealed class DpapiProtectorTests
         {
             using var settings = new SettingsService(directory);
             using var autoLogin = new AutoLoginService(settings);
-            settings.Current.Automation.AutoLoginUserName = "synthetic-account";
+            settings.Update(s => s with { Automation = s.Automation with { AutoLoginUserName = "synthetic-account" } });
             Assert.True(autoLogin.SavePassword(plain));
             Assert.True(autoLogin.HasStoredPassword);
             var cipher = settings.Current.Automation.AutoLoginPasswords["synthetic-account"];

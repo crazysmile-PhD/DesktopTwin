@@ -1212,48 +1212,6 @@ public static partial class EnvironmentFixer
     /// <summary>
     /// 跑一个外部命令，返回（标准输出，退出码）。跑不起来或超时返回退出码 -1。
     /// </summary>
-    private static (string? Output, int ExitCode) RunProcess(string fileName, string arguments)
-    {
-        try
-        {
-            using var process = Process.Start(new ProcessStartInfo
-            {
-                FileName = fileName,
-                Arguments = arguments,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true
-            });
-
-            if (process is null)
-            {
-                return (null, -1);
-            }
-
-            var output = process.StandardOutput.ReadToEnd();
-            if (!process.WaitForExit(30_000))
-            {
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch (Exception exception) when (exception is InvalidOperationException
-                                                      or System.ComponentModel.Win32Exception)
-                {
-                    // 进程刚好退出。
-                }
-
-                return (output, -1);
-            }
-
-            return (output, process.ExitCode);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException
-                                              or System.ComponentModel.Win32Exception
-                                              or IOException)
-        {
-            AppLog.Warn($"运行 {Path.GetFileName(fileName)} 失败。", exception);
-            return (null, -1);
-        }
-    }
+    private static (string? Output, int ExitCode) RunProcess(string fileName, string arguments) =>
+        BoundedProcessRunner.RunAsync(fileName, arguments, TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
 }

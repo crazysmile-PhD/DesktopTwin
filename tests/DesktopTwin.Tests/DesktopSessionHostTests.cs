@@ -14,14 +14,11 @@ public sealed class DesktopSessionHostTests
         var view = new FakeView();
         var creates = 0;
         var password = "first";
-        using var host = new DesktopSessionHost(() => { creates++; return view; }, settings,
+        using var host = new DesktopSessionHost(() => { creates++; return view; }, () => settings,
             () => ("user", "domain", password));
         Assert.Null(host.Current);
         Assert.Equal(0, creates);
-        settings.SmartSizing = true;
-        settings.AudioMuted = true;
-        settings.RelativeMouseMode = true;
-        settings.SendSystemShortcutsToRemote = false;
+        settings = settings with { SmartSizing = true, AudioMuted = true, RelativeMouseMode = true, SendSystemShortcutsToRemote = false };
         Assert.Same(view, host.GetOrCreate());
         Assert.Same(view, host.GetOrCreate());
         Assert.Equal(1, creates);
@@ -39,7 +36,7 @@ public sealed class DesktopSessionHostTests
     public void EventsForwardTheirEvidenceAndAreDetachedBeforeClose()
     {
         var view = new FakeView();
-        using var host = new DesktopSessionHost(() => view, new SessionSettings(), () => null);
+        using var host = new DesktopSessionHost(() => view, () => new SessionSettings(), () => null);
         var visibility = 0;
         var logins = 0;
         var error = new ChildSessionConnectionFailedEventArgs("failure", 42);
@@ -66,7 +63,7 @@ public sealed class DesktopSessionHostTests
     public void DisposingUnusedHostDoesNotCreateAViewAndPreventsLaterCreation()
     {
         using var host = new DesktopSessionHost(() => throw new InvalidOperationException("must not create"),
-            new SessionSettings(), () => null);
+            () => new SessionSettings(), () => null);
         host.Dispose();
         Assert.Throws<ObjectDisposedException>(host.GetOrCreate);
     }
@@ -79,7 +76,7 @@ public sealed class DesktopSessionHostTests
         first.Client.ConfigurationFailure = failure;
         var second = new FakeView();
         var views = new Queue<FakeView>([first, second]);
-        using var host = new DesktopSessionHost(() => views.Dequeue(), new SessionSettings(), () => null);
+        using var host = new DesktopSessionHost(() => views.Dequeue(), () => new SessionSettings(), () => null);
         Assert.Same(failure, Assert.Throws<InvalidOperationException>(host.GetOrCreate));
         Assert.Null(host.Current);
         Assert.Equal(1, first.CloseCalls);
@@ -93,7 +90,7 @@ public sealed class DesktopSessionHostTests
         var cleanup = new InvalidOperationException("close");
         var view = new FakeView { CloseFailure = cleanup };
         view.Client.ConfigurationFailure = configuration;
-        using var host = new DesktopSessionHost(() => view, new SessionSettings(), () => null);
+        using var host = new DesktopSessionHost(() => view, () => new SessionSettings(), () => null);
         var error = Assert.Throws<InvalidOperationException>(host.GetOrCreate);
         var aggregate = Assert.IsType<AggregateException>(error.InnerException);
         Assert.Equal(new[] { configuration, cleanup }, aggregate.InnerExceptions);

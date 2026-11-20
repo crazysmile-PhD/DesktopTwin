@@ -9,7 +9,7 @@ namespace DesktopTwin.Services;
 /// <summary>
 /// 设置读写服务。
 ///
-/// 写盘采用「延迟合并 + 显式冲刷」策略：界面上的每次开关都会调用 <see cref="SaveSoon"/>，
+/// 写盘采用「延迟合并 + 显式冲刷」策略：界面上的每次开关都会调用 <see cref="Update"/>，
 /// 800 毫秒内的连续改动只写一次盘；需要立刻落盘的场景（例如在分身里启动新进程前）调用 <see cref="Flush"/>。
 /// </summary>
 public sealed class SettingsService : IDisposable
@@ -21,6 +21,8 @@ public sealed class SettingsService : IDisposable
     };
 
     private readonly object _syncRoot = new();
+    private readonly object _writeLock = new();
+    private volatile AppSettings _current;
     private readonly Timer _saveTimer;
     private bool _savePending;
     private bool _disposed;
@@ -39,19 +41,19 @@ public sealed class SettingsService : IDisposable
             "DesktopTwin");
         SettingsPath = Path.Combine(SettingsDirectory, "settings.json");
         _saveTimer = new Timer(OnSaveTimerElapsed, state: null, Timeout.Infinite, Timeout.Infinite);
-        Current = Load();
+        _current = Load();
 
         // 迁移过就立刻写回，否则每次启动都要再迁一遍，而且用户看到的是被临时改过的值。
         if (_migrated)
         {
-            SaveSoon();
+            ScheduleSave();
         }
     }
 
     /// <summary>
-    /// 当前生效的设置对象。界面直接改它的属性，然后调用 <see cref="SaveSoon"/>。
+    /// 当前生效的不可变快照。持有旧快照的读者不会看到半次修改。
     /// </summary>
-    public AppSettings Current { get; }
+    public AppSettings Current => _current;
 
     /// <summary>
     /// 设置文件所在目录。
@@ -64,20 +66,24 @@ public sealed class SettingsService : IDisposable
     public string SettingsPath { get; }
 
     /// <summary>
-    /// 标记有改动，稍后合并写盘。
+    /// 原子发布一次完整修改，稍后合并写盘。回调不得执行 I/O 或等待外部操作。
+    /// 释放后忽略迟到的修改，避免退出时后台诊断通知重新安排写盘。
     /// </summary>
-    public void SaveSoon()
+    public void Update(Func<AppSettings, AppSettings> change)
     {
+        ArgumentNullException.ThrowIfNull(change);
         lock (_syncRoot)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _savePending = true;
-            _saveTimer.Change(SaveDelay, Timeout.InfiniteTimeSpan);
+            if (_disposed) return;
+            _current = change(_current) ?? throw new InvalidOperationException("A settings update must return a snapshot.");
+            ScheduleSave();
         }
+    }
+
+    private void ScheduleSave()
+    {
+        _savePending = true;
+        _saveTimer.Change(SaveDelay, Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>
@@ -85,12 +91,17 @@ public sealed class SettingsService : IDisposable
     /// </summary>
     public void Flush()
     {
-        lock (_syncRoot)
+        lock (_writeLock)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
-            _savePending = false;
-            WriteToDisk();
+            AppSettings snapshot;
+            lock (_syncRoot)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
+                _savePending = false;
+                snapshot = _current;
+            }
+            WriteToDisk(snapshot);
         }
     }
 
@@ -99,36 +110,33 @@ public sealed class SettingsService : IDisposable
     /// </summary>
     public void Dispose()
     {
-        lock (_syncRoot)
+        lock (_writeLock)
         {
-            if (_disposed)
+            AppSettings? snapshot;
+            lock (_syncRoot)
             {
-                return;
-            }
-
-            _disposed = true;
-            _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
-            if (_savePending)
-            {
-                WriteToDisk();
+                if (_disposed) return;
+                _disposed = true;
+                snapshot = _savePending ? _current : null;
                 _savePending = false;
+                _saveTimer.Dispose();
             }
-
-            _saveTimer.Dispose();
+            if (snapshot is not null) WriteToDisk(snapshot);
         }
     }
 
     private void OnSaveTimerElapsed(object? state)
     {
-        lock (_syncRoot)
+        lock (_writeLock)
         {
-            if (_disposed || !_savePending)
+            AppSettings snapshot;
+            lock (_syncRoot)
             {
-                return;
+                if (_disposed || !_savePending) return;
+                _savePending = false;
+                snapshot = _current;
             }
-
-            _savePending = false;
-            WriteToDisk();
+            WriteToDisk(snapshot);
         }
     }
 
@@ -145,7 +153,7 @@ public sealed class SettingsService : IDisposable
             var settings = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions)
                 ?? new AppSettings { SettingsVersion = AppSettings.CurrentVersion };
 
-            _migrated = AppSettingsNormalizer.NormalizeAndMigrate(settings, Environment.UserName);
+            _migrated = AppSettingsNormalizer.NormalizeAndMigrate(ref settings, Environment.UserName);
             return settings;
         }
         catch (Exception exception) when (exception is IOException
@@ -157,7 +165,7 @@ public sealed class SettingsService : IDisposable
         }
     }
 
-    private void WriteToDisk()
+    private void WriteToDisk(AppSettings snapshot)
     {
         try
         {
@@ -165,7 +173,7 @@ public sealed class SettingsService : IDisposable
 
             // 先写临时文件再替换，避免写到一半被中断后留下损坏的 settings.json。
             var temporaryPath = SettingsPath + ".tmp";
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(Current, SerializerOptions));
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot, SerializerOptions));
             File.Move(temporaryPath, SettingsPath, overwrite: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

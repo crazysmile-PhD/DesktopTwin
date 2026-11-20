@@ -1,11 +1,43 @@
 using DesktopTwin.Models;
 using DesktopTwin.Services;
 using NetArchTest.Rules;
+using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 
 namespace DesktopTwin.Tests;
 
 public sealed class ArchitectureTests
 {
+    [Fact]
+    public void PublishedSettingsGraphOnlyContainsImmutableValues()
+    {
+        var pending = new Queue<Type>([typeof(AppSettings)]);
+        var visited = new HashSet<Type>();
+        while (pending.TryDequeue(out var type))
+        {
+            if (!visited.Add(type)) continue;
+            Assert.True(type.IsSealed, $"Published settings type must be sealed: {type}");
+            foreach (var property in type.GetProperties())
+            {
+                var setter = property.SetMethod;
+                Assert.True(setter is null || setter.ReturnParameter.GetRequiredCustomModifiers().Contains(typeof(IsExternalInit)),
+                    $"Published settings property must be init-only: {type}.{property.Name}");
+                var valueType = property.PropertyType;
+                if (valueType.IsPrimitive || valueType == typeof(string)) continue;
+                if (valueType.IsGenericType)
+                {
+                    var generic = valueType.GetGenericTypeDefinition();
+                    Assert.True(generic == typeof(ImmutableList<>) || generic == typeof(ImmutableDictionary<,>),
+                        $"Mutable collection in settings graph: {type}.{property.Name}");
+                    Assert.All(valueType.GenericTypeArguments, argument => Assert.Equal(typeof(string), argument));
+                    continue;
+                }
+                Assert.Equal("DesktopTwin.Models", valueType.Namespace);
+                pending.Enqueue(valueType);
+            }
+        }
+    }
+
     [Fact]
     public void SettingsModelsRemainIndependentOfUiStorageAndServices()
     {

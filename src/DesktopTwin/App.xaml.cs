@@ -117,17 +117,13 @@ public partial class App : Application
         var settingsForDeepScan = _settings;
         ChildSessionEnvironmentCheck.DeepScanObligationChanged = pending =>
         {
-            settingsForDeepScan.Current.PersistenceDeepScanPending = pending;
+            settingsForDeepScan.Update(s => s with { PersistenceDeepScanPending = pending });
 
             if (pending)
             {
                 // 置位要立刻落盘：这条义务的全部意义就是「程序异常退出也不丢」，
-                // 而 SaveSoon 有 800 毫秒延迟，正好覆盖不了崩溃窗口。
+                // 延迟写盘有 800 毫秒窗口，正好覆盖不了崩溃窗口。
                 settingsForDeepScan.Flush();
-            }
-            else
-            {
-                settingsForDeepScan.SaveSoon();
             }
         };
 
