@@ -22,7 +22,7 @@ internal sealed class RelativeInputController : IDisposable
     private RelativeInputSession? _session;
     private CancellationTokenSource? _starting;
     private uint? _sessionId;
-    private bool _releasedByUser;
+    private readonly CaptureReleaseGesture _gesture = new();
     private bool _failed;
     private bool _disposed;
     internal bool Captured => _capture.Active;
@@ -35,7 +35,7 @@ internal sealed class RelativeInputController : IDisposable
     {
         _window = window;
         _settings = settings;
-        _capture = new RelativeMouseCapture(Send);
+        _capture = new RelativeMouseCapture(Send, ObserveGesture);
         _poll = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(32) };
         _poll.Tick += Poll;
         window.RdpHost.LoginCompleted += OnLogin;
@@ -51,6 +51,12 @@ internal sealed class RelativeInputController : IDisposable
     internal bool Move(int x, int y) => Captured && Send(new InputPacket(InputOperation.Move, x, y));
     internal bool Click() => Captured && Send(new InputPacket(InputOperation.Button, 1, 1))
         && Send(new InputPacket(InputOperation.Button, 1, 0));
+
+    private void ObserveGesture(int message, int key, bool alt)
+    {
+        _gesture.ObserveMessage(message, key, alt || Status?.CursorVisible == true);
+        if (_gesture.Released) ReleasePointer();
+    }
 
     private void Poll(object? sender, EventArgs e)
     {
@@ -78,16 +84,16 @@ internal sealed class RelativeInputController : IDisposable
     private void UpdateCapture()
     {
         var alt = RawMouseNative.GetAsyncKeyState(0x12) < 0;
-        if (alt && RawMouseNative.GetAsyncKeyState(0x11) < 0) _releasedByUser = true;
+        _gesture.ObserveModifiers(alt, RawMouseNative.GetAsyncKeyState(0x11) < 0);
+        var inputWindow = ChildSessionNativeMethods.GetRdpInputWindow(_window.RdpHost.Handle);
+        if (inputWindow == 0) { Release(); return; }
+        _capture.Observe(inputWindow);
         WindowNativeMethods.TryGetWindowRect(_window.RdpHost.Handle, out var bounds);
         var point = DiagnosticInput.Cursor();
         var inside = point.X >= bounds.Left && point.X < bounds.Right && point.Y >= bounds.Top && point.Y < bounds.Bottom;
-        if (!alt && inside && RawMouseNative.GetAsyncKeyState(1) < 0) _releasedByUser = false;
-        var capture = !alt && !_releasedByUser && Status?.CursorVisible == false && inside
+        var capture = !alt && !_gesture.Released && Status?.CursorVisible == false && inside
             && ChildSessionNativeMethods.IsRdpInputWindowFocused(_window.RdpHost.Handle);
         if (!capture) { ReleasePointer(); return; }
-        var inputWindow = ChildSessionNativeMethods.GetRdpInputWindow(_window.RdpHost.Handle);
-        if (inputWindow == 0) { Release(); return; }
         _capture.Start(inputWindow, bounds);
         _capture.Constrain(bounds);
     }
@@ -126,10 +132,11 @@ internal sealed class RelativeInputController : IDisposable
         if (Captured) Send(new InputPacket(InputOperation.ReleasePointer));
         _capture.Stop();
     }
-    private void Release() { ReleasePointer(); _session?.SetForegroundLease(false); }
+    private void Release() { ReleasePointer(); _gesture.ClearModifiers(); _session?.SetForegroundLease(false); }
     private void StopSession()
     {
         Release();
+        _capture.Detach();
         _starting?.Cancel();
         _session?.Dispose();
         _session = null;

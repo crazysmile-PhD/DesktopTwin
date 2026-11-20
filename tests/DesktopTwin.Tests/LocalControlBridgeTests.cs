@@ -36,6 +36,8 @@ public sealed class LocalControlBridgeTests
         new DesktopControlRequest("mouse", X: 100, Y: -100).Validate();
         new DesktopControlRequest("key", Key: "w", Milliseconds: 250).Validate();
         new DesktopControlRequest("resize", Width: 960, Height: 700).Validate();
+        new DesktopControlRequest("probe_focus").Validate();
+        new DesktopControlRequest("release_mouse", Milliseconds: 0).Validate();
         Assert.Throws<ArgumentOutOfRangeException>(() => new DesktopControlRequest("mouse", X: 501).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new DesktopControlRequest("key", Key: "W", Milliseconds: 1001).Validate());
         Assert.Throws<ArgumentOutOfRangeException>(() => new DesktopControlRequest("resize", Width: 100, Height: 700).Validate());

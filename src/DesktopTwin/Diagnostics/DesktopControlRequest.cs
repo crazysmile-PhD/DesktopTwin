@@ -8,7 +8,8 @@ internal sealed record DesktopControlRequest(string Command, int X = 0, int Y = 
 {
     internal void Validate()
     {
-        if (Command is not ("state" or "connect" or "focus" or "launch_target" or "resize" or "mouse" or "click" or "key"))
+        if (Command is not ("state" or "connect" or "focus" or "launch_target" or "resize" or "mouse" or "click" or "key"
+            or "probe_focus" or "release_mouse"))
             throw new ArgumentException("Unknown control command.");
         if (Milliseconds is < 0 or > 1000) throw new ArgumentOutOfRangeException(nameof(Milliseconds));
         if (Command == "resize" && (Width is < 415 or > 7680 || Height is < 120 or > 4320))

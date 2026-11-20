@@ -24,6 +24,9 @@
   "INPUT001": {
     "description": "Session relative input preserves raw deltas and transitions, releases on lease loss, and authenticates its companion.",
     "tests": [
+      "DesktopTwin.Tests.RelativeInputTests.ShortReleaseChordAndClickAreRememberedBetweenTimerSamples",
+      "DesktopTwin.Tests.RelativeInputTests.AltMenuClickKeepsManualReleaseAndFocusLossClearsStaleModifiers",
+      "DesktopTwin.Tests.RdpCaptureGestureTests.NativeObserverKeepsReceivingReleasedClicksAndDetachesFromReplacedWindows",
       "DesktopTwin.Tests.RelativeInputTests.RawRelativeMotionIsUnscaledAndAbsoluteDevicesRebaseOnDeviceOrDisplayChange",
       "DesktopTwin.Tests.RelativeInputTests.MovementCoalescesWithoutReorderingButtonTransitionsOrLosingOverflow",
       "DesktopTwin.Tests.RelativeInputTests.LeaseRevocationReleasesHeldInputsAndPreventsLateMovement",

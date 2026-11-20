@@ -24,13 +24,15 @@ Start-Process ./DesktopTwin.exe -ArgumentList @('--control-pipe', $pipeName)
 | `{"command":"state"}` | 读取连接、窗口/原生画面边界、远端实际尺寸、焦点、光标和鼠标模式证据 |
 | `{"command":"connect"}` | 调用既有启动连接流程；不会代替用户处理凭据提示 |
 | `{"command":"focus"}` | 激活宿主并尝试聚焦 RDP 输入窗口，返回焦点结果 |
+| `{"command":"probe_focus"}` | 短暂打开应用自己的测试窗口，返回失焦前、失焦中、恢复后的状态；不操控其他应用 |
+| `{"command":"release_mouse","milliseconds":100}` | 在宿主发送固定 Ctrl+Alt 释放手势，最长 1000 毫秒；0 毫秒可测试快速手势 |
 | `{"command":"launch_target"}` | 调用已配置目标的启动流程，保留原有授权确认 |
 | `{"command":"resize","width":960,"height":700}` | 以 DIP 调整宿主，限制在当前显示器工作区；不允许在不可调整的全屏状态执行 |
 | `{"command":"click","x":400,"y":300,"alt":true}` | 在原生 RDP 画面内的物理像素坐标左击，可短暂按住 Alt |
 | `{"command":"mouse","x":100,"y":0}` | 从已位于画面内的光标位置发送相对移动，每轴最多 500；结果仍受系统指针加速和 RDP 模式影响 |
 | `{"command":"key","key":"W","milliseconds":200}` | 按住允许键，最长 1000 毫秒，结束或取消后释放 |
 
-允许键只有 W/A/S/D、Escape、Enter、Tab、Alt、Space。没有路径、脚本、任意组合键、系统设置、注销或退出命令。游戏输入与目标启动要求 RDP 已登录、处于控制模式、宿主是前台窗口，且输入焦点得到确认。用户切换到其他窗口后应停止输入测试。
+允许键只有 W/A/S/D、Escape、Enter、Tab、Alt、Space，另有独立的固定 Ctrl+Alt 释放手势。没有路径、脚本、任意组合键、系统设置、注销或退出命令。输入与失焦测试、目标启动要求 RDP 已登录、处于控制模式、宿主是前台窗口，且输入焦点得到确认。用户切换到其他窗口后应停止输入测试。失焦测试只激活自己的临时窗口并自动关闭、恢复主窗口。
 
 `relativeAccepted` 只代表连接前属性写入；`relativeReadback` 是登录后回读；`relativeReported` 是 RDP 模式变化回调。任意一个值都不能单独证明游戏转视角可用。对照普通桌面点击、Alt 菜单点击与未按 Alt 的视角变化，记录实际截图与状态，才能判断输入在哪一层失败。
 

@@ -6,6 +6,58 @@ namespace DesktopTwin.Tests;
 public sealed class RelativeInputTests
 {
     [Fact]
+    public void ShortReleaseChordAndClickAreRememberedBetweenTimerSamples()
+    {
+        var gesture = new CaptureReleaseGesture();
+        gesture.ObserveMessage(0x100, 0x11, false);
+        gesture.ObserveMessage(0x104, 0x12, true);
+        gesture.ObserveMessage(0x105, 0x12, false);
+        gesture.ObserveMessage(0x101, 0x11, false);
+        gesture.ObserveModifiers(false, false);
+        Assert.True(gesture.Released);
+        gesture.ObserveMessage(0x201, 1, false);
+        gesture.ObserveMessage(0x202, 0, false);
+        gesture.ObserveModifiers(false, false);
+        Assert.False(gesture.Released);
+    }
+
+    [Fact]
+    public void AltMenuClickKeepsManualReleaseAndFocusLossClearsStaleModifiers()
+    {
+        var gesture = new CaptureReleaseGesture();
+        gesture.ObserveModifiers(true, true);
+        gesture.ObserveMessage(0x201, 1, true);
+        Assert.True(gesture.Released);
+        gesture.ObserveMessage(0x104, 0x12, true);
+        gesture.ObserveMessage(0x201, 1, false);
+        Assert.True(gesture.Released);
+        gesture.ClearModifiers();
+        Assert.True(gesture.Released);
+        gesture.ObserveMessage(0x203, 1, false);
+        Assert.False(gesture.Released);
+    }
+
+    [Fact]
+    public void ReleaseGestureAcceptsEitherModifierOrderAndLeftOrRightKeys()
+    {
+        foreach (var alt in new[] { 0x12, 0xA4, 0xA5 })
+        foreach (var control in new[] { 0x11, 0xA2, 0xA3 })
+        {
+            var gesture = new CaptureReleaseGesture();
+            gesture.ObserveMessage(0x104, alt, true);
+            gesture.ObserveModifiers(false, false); // Current hardware state must not erase queued key transitions.
+            gesture.ObserveMessage(0x100, control, false);
+            Assert.True(gesture.Released);
+            gesture.ClearModifiers();
+            gesture.ObserveMessage(0x201, 1, false);
+            Assert.False(gesture.Released);
+            gesture.ObserveMessage(0x100, 0x41, false);
+            gesture.ObserveMessage(0x101, 0x41, false);
+            Assert.False(gesture.Released);
+        }
+    }
+
+    [Fact]
     public void RawRelativeMotionIsUnscaledAndAbsoluteDevicesRebaseOnDeviceOrDisplayChange()
     {
         var mouse = new RawMouseDeltas();

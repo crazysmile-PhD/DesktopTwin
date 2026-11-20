@@ -47,6 +47,13 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
                 window.Height = Math.Min(request.Height, area.Height / dpi.DpiScaleY);
                 window.UpdateLayout();
                 return CaptureControlState();
+            case "probe_focus":
+                RequireControlInput();
+                return await DesktopInputFocusProbe.RunAsync(window, CaptureControlState, cancellationToken);
+            case "release_mouse":
+                RequireControlInput();
+                await ReleaseMouseAsync(request.Milliseconds, cancellationToken);
+                return CaptureControlState();
             case "key":
             case "mouse":
             case "click":
@@ -61,16 +68,17 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
         var rect = RequireControlInput();
         var scan = request.Command == "key" ? DesktopControlRequest.ScanCode(request.Key) : (ushort)0;
         var alt = request.Alt && scan != DesktopControlRequest.ScanCode("ALT");
+        var sessionInput = window.RelativeInput.Ready;
         try
         {
             if (alt)
             {
-                await HoldAltForMenuAsync(cancellationToken);
+                await HoldAltForMenuAsync(sessionInput, cancellationToken);
                 rect = RequireControlInput();
             }
             if (scan != 0)
             {
-                SendKey(scan, false);
+                SendKey(scan, false, sessionInput);
                 await Task.Delay(request.Milliseconds, cancellationToken);
                 return;
             }
@@ -97,15 +105,14 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
         }
         finally
         {
-            if (scan != 0) SendKey(scan, true);
-            if (alt) SendKey(0x38, true);
+            if (scan != 0) SendKey(scan, true, sessionInput);
+            if (alt) SendKey(0x38, true, sessionInput);
         }
     }
 
-    private async Task HoldAltForMenuAsync(CancellationToken cancellationToken)
+    private async Task HoldAltForMenuAsync(bool sessionInput, CancellationToken cancellationToken)
     {
-        var sessionInput = window.RelativeInput.Ready;
-        SendKey(0x38, false);
+        SendKey(0x38, false, sessionInput);
         if (!sessionInput) { await Task.Delay(200, cancellationToken); return; }
         // Game cursor transitions can take longer than a fixed 200 ms. Never turn a menu click into an attack.
         var deadline = Environment.TickCount64 + 1200;
@@ -117,9 +124,28 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
             throw new InvalidOperationException("The game did not release its cursor for the Alt click.");
     }
 
-    private void SendKey(ushort scan, bool up)
+    private void SendKey(ushort scan, bool up, bool sessionInput)
     {
-        if (!window.RelativeInput.SendKey(scan, up)) DiagnosticInput.Key(scan, up);
+        if (!sessionInput) { DiagnosticInput.Key(scan, up); return; }
+        if (!window.RelativeInput.SendKey(scan, up) && !up)
+            throw new InvalidOperationException("The session input channel disconnected before the key was sent.");
+        // A disconnected receiver releases its own held keys; never fall back into another foreground app.
+    }
+
+    private static async Task ReleaseMouseAsync(int milliseconds, CancellationToken cancellationToken)
+    {
+        try
+        {
+            DiagnosticInput.Key(0x1D, false);
+            DiagnosticInput.Key(0x38, false);
+            await Task.Delay(milliseconds, cancellationToken);
+        }
+        finally
+        {
+            try { DiagnosticInput.Key(0x38, true); }
+            finally { DiagnosticInput.Key(0x1D, true); }
+        }
+        await Task.Delay(100, cancellationToken);
     }
 
     private WindowNativeMethods.NativeRect RequireControlInput()

@@ -6,21 +6,28 @@ using DesktopTwin.Services;
 
 namespace DesktopTwin.Interop;
 
-/// <summary>Subclasses the RDP input surface while captured; raw motion replaces legacy motion, never duplicates it.</summary>
-internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send) : NativeWindow, IDisposable
+/// <summary>Observes RDP gestures even while released; captured raw motion replaces legacy motion.</summary>
+internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send, Action<int, int, bool> observe) : NativeWindow, IDisposable
 {
     private readonly RawMouseDeltas _deltas = new();
     private RawMouseNative.Device? _previousRegistration;
     private WindowNativeMethods.NativeRect _clip;
     private bool _ownsClip;
-    internal bool Active => Handle != 0;
+    internal bool Active { get; private set; }
     internal long RawMoves { get; private set; }
 
+    internal void Observe(nint inputWindow)
+    {
+        if (Handle == inputWindow) return;
+        Detach();
+        AssignHandle(inputWindow);
+    }
     internal void Start(nint inputWindow, WindowNativeMethods.NativeRect bounds)
     {
+        Observe(inputWindow);
         if (Active) return;
         _previousRegistration = RawMouseNative.RegisteredMouse();
-        AssignHandle(inputWindow);
+        Active = true;
         try
         {
             RawMouseNative.Register(new RawMouseNative.Device { Page = 1, Usage = 2, Window = inputWindow });
@@ -58,11 +65,19 @@ internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send) : Nativ
                 RawMouseNative.Register(_previousRegistration ?? new RawMouseNative.Device { Page = 1, Usage = 2, Flags = 1 });
         }
         catch (System.ComponentModel.Win32Exception error) { AppLog.Warn("恢复原有鼠标注册失败。", error); }
-        finally { ReleaseHandle(); _deltas.Reset(); }
+        finally { Active = false; _deltas.Reset(); }
+    }
+    internal void Detach()
+    {
+        Stop();
+        if (Handle != 0) ReleaseHandle();
     }
     protected override void WndProc(ref Message message)
     {
         var alt = RawMouseNative.GetAsyncKeyState(0x12) < 0;
+        if (message.Msg is 0x100 or 0x101 or 0x104 or 0x105 or 0x201 or 0x203)
+            observe(message.Msg, (int)message.WParam, alt);
+        if (!Active) { base.WndProc(ref message); return; }
         if (alt) ReleaseConfinement();
         if (message.Msg == 0xFF && !alt)
         {
@@ -97,5 +112,5 @@ internal sealed class RelativeMouseCapture(Func<InputPacket, bool> send) : Nativ
         send(new InputPacket(InputOperation.Button, button, down ? 1 : 0));
         return true;
     }
-    public void Dispose() => Stop();
+    public void Dispose() => Detach();
 }
