@@ -794,8 +794,7 @@ public partial class MainWindow : FluentWindow
     private void OnFullscreenTogglePinClicked(object sender, RoutedEventArgs e)
     {
         _barPinned = !_barPinned;
-        _settings.Current.Window.FullscreenBarPinned = _barPinned;
-        _settings.SaveSoon();
+        _settings.Update(s => s with { Window = s.Window with { FullscreenBarPinned = _barPinned } });
 
         UpdatePinButtons();
 

@@ -36,5 +36,34 @@
       "DesktopTwin.Tests.SessionLaunchIntegrationTests.CancellationClosesChannelAndStopsWorker",
       "DesktopTwin.Tests.SessionLaunchIntegrationTests.RealSchedulerDeletesTaskBeforeTargetStarts"
     ]
+  },
+  "SET001": {
+    "description": "Published settings are immutable; updates are atomic and concurrent flushes persist one coherent snapshot.",
+    "tests": [
+      "DesktopTwin.Tests.ArchitectureTests.PublishedSettingsGraphOnlyContainsImmutableValues",
+      "DesktopTwin.Tests.SettingsServiceTests.PublishedSettingsRemainImmutableAndUpdatesAreAtomic",
+      "DesktopTwin.Tests.SettingsServiceTests.ConcurrentFlushPersistsOneCompleteSnapshot",
+      "DesktopTwin.Tests.SettingsServiceTests.FailedUpdateLeavesThePublishedSnapshotIntact",
+      "DesktopTwin.Tests.SettingsServiceTests.DeferredSavePersistsTheLatestChange",
+      "DesktopTwin.Tests.SettingsServiceTests.UpdateAfterDisposeDoesNotPublishOrScheduleSave",
+      "DesktopTwin.Tests.SettingsServiceTests.PreviouslyDamagedHistoryIsRepairedAndPersisted"
+    ]
+  },
+  "PROC001": {
+    "description": "The command deadline covers stdout and process exit together; output cannot deadlock the runner and live owned process trees are stopped on timeout.",
+    "tests": [
+      "DesktopTwin.Tests.BoundedProcessRunnerTests.LargeOutputIsDrainedWhileTheProcessRunsAndExitCodeIsPreserved",
+      "DesktopTwin.Tests.BoundedProcessRunnerTests.DeadlineIncludesOutputReadAndStopsTheRunningProcessTree",
+      "DesktopTwin.Tests.BoundedProcessRunnerTests.DeadlineAlsoBoundsOutputInheritedByAChildAfterTheParentExits",
+      "DesktopTwin.Tests.BoundedProcessRunnerTests.FailedStartReturnsFailure"
+    ]
+  },
+  "WATCH001": {
+    "description": "Queued cancellation cannot read disposed sources; watcher generations drain sequentially and every fault is observed.",
+    "tests": [
+      "DesktopTwin.Tests.CredentialDialogWatchTests.StoppingBeforeQueuedWorkStartsDoesNotUseADisposedSource",
+      "DesktopTwin.Tests.CredentialDialogWatchTests.RestartWaitsForCanceledWorkToDrainAndOldTokenStaysCanceled",
+      "DesktopTwin.Tests.CredentialDialogWatchTests.FaultsAndCancellationAreObservedAndDoNotPoisonTheNextConnection"
+    ]
   }
 }

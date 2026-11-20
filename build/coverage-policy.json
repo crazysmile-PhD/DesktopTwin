@@ -6,5 +6,6 @@
   "DesktopTwin.Services.SessionLogoffOperation": { "line": 0.90, "branch": 0.80, "asyncMethods": ["ObserveAsync"] },
   "DesktopTwin.Services.SettingsService": { "line": 0.90, "branch": 0.80 },
   "DesktopTwin.Services.DesktopSessionHost": { "line": 0.95, "branch": 0.90 },
-  "DesktopTwin.Credentials.AccountCredentialStore": { "line": 0.95, "branch": 0.90 }
+  "DesktopTwin.Credentials.AccountCredentialStore": { "line": 0.95, "branch": 0.90 },
+  "DesktopTwin.Services.CredentialDialogWatch": { "line": 0.95, "branch": 0.90, "asyncMethods": ["RunAsync"] }
 }

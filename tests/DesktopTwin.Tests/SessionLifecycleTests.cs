@@ -138,7 +138,7 @@ public sealed class SessionLifecycleTests
         var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
         Set(service, "_desktopHost", new DesktopSessionHost(
             () => throw new InvalidOperationException("This lifecycle fixture must not create a view."),
-            new SessionSettings(), () => null));
+            () => new SessionSettings(), () => null));
         return service;
     }
 
