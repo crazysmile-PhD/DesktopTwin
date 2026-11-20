@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -85,6 +86,15 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
                 channel.LaunchAndConfirmAsync(_fixture.Target, "exit", _fixture.Directory, default));
             Assert.Contains("退出码 7", error.Message);
         });
+    }
+
+    [Fact]
+    public async Task FixtureCleanupAcceptsAlreadyExitedTarget()
+    {
+        using var target = Process.Start(new ProcessStartInfo(_fixture.Target, "exit")
+            { UseShellExecute = false, CreateNoWindow = true })!;
+        await target.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        _fixture.KillTargetIfOwned(target);
     }
 
     [Theory]
@@ -232,10 +242,24 @@ public sealed class SessionLaunchFixture : IDisposable
         {
             using (process)
             {
-                if (string.Equals(process.MainModule?.FileName, Target, StringComparison.OrdinalIgnoreCase))
-                { process.Kill(); process.WaitForExit(5000); }
+                KillTargetIfOwned(process);
             }
         }
+    }
+
+    internal void KillTargetIfOwned(Process process)
+    {
+        try
+        {
+            if (process.HasExited) return;
+            if (!string.Equals(process.MainModule?.FileName, Target, StringComparison.OrdinalIgnoreCase)) return;
+            process.Kill();
+            if (!process.WaitForExit(5000)) throw new TimeoutException("Owned launch fixture did not exit during cleanup.");
+        }
+        // A snapshot from GetProcessesByName may exit before identity lookup or Kill.
+        // Ignore only confirmed exit; access failures for a live process still fail CI.
+        catch (Win32Exception) when (process.HasExited || process.WaitForExit(1000)) { }
+        catch (InvalidOperationException) when (process.HasExited || process.WaitForExit(1000)) { }
     }
 
     public void Dispose()

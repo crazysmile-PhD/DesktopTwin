@@ -10,6 +10,9 @@ Set-StrictMode -Version Latest
 $results = @(Get-ChildItem -LiteralPath $ResultsDirectory -Filter *.trx -Recurse -File)
 if ($results.Count -ne 1) { throw "Expected one TRX report; found $($results.Count)." }
 [xml]$trx = Get-Content -LiteralPath $results[0].FullName -Raw
+if ($trx.TestRun.ResultSummary.outcome -cne 'Completed') {
+    throw "Test run did not complete successfully, including fixture cleanup: $($trx.TestRun.ResultSummary.outcome)."
+}
 $counters = $trx.TestRun.ResultSummary.Counters
 $total = [int]$counters.total
 if ($total -le 0 -or [int]$counters.executed -ne $total -or [int]$counters.passed -ne $total) {

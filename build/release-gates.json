@@ -28,5 +28,13 @@
       "DesktopTwin.Tests.DpapiProtectorTests.SyntheticSecretRoundTripsThroughWindowsProtection",
       "DesktopTwin.Tests.DpapiProtectorTests.AutoLoginPersistsOnlyProtectedValues"
     ]
+  },
+  "TEST001": {
+    "description": "Owned integration processes are cleaned up safely even when targets exit during cleanup; run-level errors block release.",
+    "tests": [
+      "DesktopTwin.Tests.SessionLaunchIntegrationTests.FixtureCleanupAcceptsAlreadyExitedTarget",
+      "DesktopTwin.Tests.SessionLaunchIntegrationTests.CancellationClosesChannelAndStopsWorker",
+      "DesktopTwin.Tests.SessionLaunchIntegrationTests.RealSchedulerDeletesTaskBeforeTargetStarts"
+    ]
   }
 }
