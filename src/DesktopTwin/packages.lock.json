@@ -20,12 +20,6 @@
         "resolved": "1.1.135",
         "contentHash": "r8qBEXmQfORso2+MVHnt8PSH4761zJ0SIxgQTSEDVLU97EN2FZdG6/ZCYUPhQy+OrPKgnpYBCAs3PS6Bs7wRsg=="
       },
-      "System.Management": {
-        "type": "Direct",
-        "requested": "[10.0.15, )",
-        "resolved": "10.0.15",
-        "contentHash": "U21LynVbH2ayLFLTqlLnd3hx52Fe/acpCXO4BAUIqfWs8CwFWT0zxlg8WR2+LZ7zcLgi/d08eq7rp4iLMMt+4w=="
-      },
       "WPF-UI": {
         "type": "Direct",
         "requested": "[4.2.0, )",
@@ -41,13 +35,6 @@
         "contentHash": "N4/ODw2F7yniiaEO6aEaxFC8aMJDJTGoeNNv3LLXFJs+qY2Flu9fMqFrRfcCFTk4ZKg1+guUB6Y0QKi6AGt88w=="
       }
     },
-    "net10.0-windows7.0/win-x64": {
-      "System.Management": {
-        "type": "Direct",
-        "requested": "[10.0.15, )",
-        "resolved": "10.0.15",
-        "contentHash": "U21LynVbH2ayLFLTqlLnd3hx52Fe/acpCXO4BAUIqfWs8CwFWT0zxlg8WR2+LZ7zcLgi/d08eq7rp4iLMMt+4w=="
-      }
-    }
+    "net10.0-windows7.0/win-x64": {}
   }
 }

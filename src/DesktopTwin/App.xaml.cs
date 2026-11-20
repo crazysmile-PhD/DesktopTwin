@@ -152,30 +152,11 @@ public partial class App : Application
         if (sender is Window window) window.ContentRendered -= OnFirstContentRendered;
         AppLog.Info($"性能计时：App 创建至首帧 = {Stopwatch.GetElapsedTime(_startupTick).TotalMilliseconds:F0} ms");
         // 首帧之后再启动后台 COM 清扫，避免冷启动时与界面争用磁盘及运行时初始化。
-        _ = Task.Run(ChildSessionProcessLauncher.SweepOrphanTasks);
-    }
-
-    /// <summary>
-    /// 弹一条托盘气泡。窗口最小化/隐藏时（例如视角切换的收尾），
-    /// 窗口内的通知条用户看不见，这是唯一可见的提示通道。
-    /// </summary>
-    /// <param name="title">标题。</param>
-    /// <param name="message">正文。</param>
-    public static void ShowTrayBalloon(string title, string message)
-    {
-        if (Current is not App { _trayIcon: { } tray })
+        _ = Task.Run(() =>
         {
-            return;
-        }
-
-        var dispatcher = System.Windows.Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-        {
-            tray.ShowBalloon(title, message);
-            return;
-        }
-
-        _ = dispatcher.BeginInvoke(new Action(() => tray.ShowBalloon(title, message)));
+            LegacyUuAgentCleanup.Run();
+            ChildSessionProcessLauncher.SweepOrphanTasks();
+        });
     }
 
     /// <inheritdoc />

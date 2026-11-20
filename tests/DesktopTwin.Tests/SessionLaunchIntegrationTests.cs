@@ -11,11 +11,68 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
     public SessionLaunchIntegrationTests(SessionLaunchFixture fixture) => _fixture = fixture;
 
     [Fact]
+    public async Task UpgradeRemovesOnlyTheRetiredAgentAndItsStartupEntry()
+    {
+        var legacyDirectory = Path.Combine(_fixture.Directory, "legacy");
+        var unrelatedDirectory = Path.Combine(_fixture.Directory, "unrelated");
+        Directory.CreateDirectory(legacyDirectory);
+        Directory.CreateDirectory(unrelatedDirectory);
+        var retired = Path.Combine(legacyDirectory, "DesktopTwin.Agent.exe");
+        var unrelated = Path.Combine(unrelatedDirectory, "DesktopTwin.Agent.exe");
+        File.Copy(_fixture.Target, retired);
+        File.Copy(_fixture.Target, unrelated);
+        File.WriteAllText(Path.Combine(legacyDirectory, "uu-switch-request.json"), "old request");
+        File.WriteAllText(Path.Combine(legacyDirectory, "session-agent-heartbeat.txt"), "old heartbeat");
+        var retainedSettings = Path.Combine(legacyDirectory, "settings.json");
+        File.WriteAllText(retainedSettings, "retained settings");
+        var keyName = @"Software\DesktopTwinTests\" + Guid.NewGuid().ToString("N");
+        using var retiredProcess = Process.Start(new ProcessStartInfo(retired, "hidden")
+            { UseShellExecute = false, CreateNoWindow = true })!;
+        using var unrelatedProcess = Process.Start(new ProcessStartInfo(unrelated, "hidden")
+            { UseShellExecute = false, CreateNoWindow = true })!;
+        try
+        {
+            using var startup = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(keyName);
+            startup.SetValue("DesktopTwinSessionAgent", retired);
+            startup.SetValue("OtherStartup", "retained startup");
+            LegacyUuAgentCleanup.Remove(legacyDirectory, startup);
+            await retiredProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(unrelatedProcess.HasExited);
+            Assert.Null(startup.GetValue("DesktopTwinSessionAgent"));
+            Assert.Equal("retained startup", startup.GetValue("OtherStartup"));
+            Assert.False(File.Exists(retired));
+            Assert.False(File.Exists(Path.Combine(legacyDirectory, "uu-switch-request.json")));
+            Assert.False(File.Exists(Path.Combine(legacyDirectory, "session-agent-heartbeat.txt")));
+            Assert.Equal("retained settings", File.ReadAllText(retainedSettings));
+            Assert.True(File.Exists(_fixture.Worker));
+            LegacyUuAgentCleanup.Remove(legacyDirectory, startup); // Repeated upgrades are harmless.
+        }
+        finally
+        {
+            foreach (var process in new[] { retiredProcess, unrelatedProcess })
+            {
+                if (!process.HasExited) process.Kill();
+                await process.WaitForExitAsync();
+            }
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(keyName, throwOnMissingSubKey: false);
+        }
+    }
+
+    [Fact]
+    public async Task WorkerRejectsRetiredHotkeyMode()
+    {
+        using var worker = Process.Start(new ProcessStartInfo(_fixture.Worker, "--hotkey Ctrl+Alt+U")
+            { UseShellExecute = false, CreateNoWindow = true })!;
+        await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, worker.ExitCode);
+    }
+
+    [Fact]
     public async Task RealWorkerConfirmsResponsiveWindow()
     {
         await WithWorker(async channel =>
         {
-            await channel.LaunchAndConfirmAsync(_fixture.Target, "window", _fixture.Directory, false, default);
+            await channel.LaunchAndConfirmAsync(_fixture.Target, "window", _fixture.Directory, default);
         });
     }
 
@@ -25,7 +82,7 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
         await WithWorker(async channel =>
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                channel.LaunchAndConfirmAsync(_fixture.Target, "exit", _fixture.Directory, false, default));
+                channel.LaunchAndConfirmAsync(_fixture.Target, "exit", _fixture.Directory, default));
             Assert.Contains("退出码 7", error.Message);
         });
     }
@@ -38,7 +95,7 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
         await WithWorker(async channel =>
         {
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                channel.LaunchAndConfirmAsync(_fixture.Target, mode, _fixture.Directory, false, default, 600));
+                channel.LaunchAndConfirmAsync(_fixture.Target, mode, _fixture.Directory, default, 600));
             Assert.Contains("未在确认期限内", error.Message);
         });
     }
@@ -58,17 +115,6 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
     }
 
     [Fact]
-    public async Task VisibleProcessCannotSubstituteForAgentReadinessSignal()
-    {
-        await WithWorker(async channel =>
-        {
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                channel.LaunchAndConfirmAsync(_fixture.Target, "window", _fixture.Directory, true, default, 600));
-            Assert.Contains("代理未确认", error.Message);
-        });
-    }
-
-    [Fact]
     public async Task CancellationClosesChannelAndStopsWorker()
     {
         using var channel = new SessionLaunchChannel(_fixture.Worker, _fixture.SessionId);
@@ -76,7 +122,7 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
         await channel.ConnectAsync(default);
         using var cancel = new CancellationTokenSource(250);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            channel.LaunchAndConfirmAsync(_fixture.Target, "hidden", _fixture.Directory, false, cancel.Token));
+            channel.LaunchAndConfirmAsync(_fixture.Target, "hidden", _fixture.Directory, cancel.Token));
         await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
         _fixture.KillTargets();
     }
@@ -86,7 +132,7 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
     {
         var prefix = "DesktopTwin-SessionLaunch-Test" + Guid.NewGuid().ToString("N") + "-";
         await Task.Run(() => ChildSessionProcessLauncher.LaunchWithTemporaryTaskAsync(
-            _fixture.SessionId, _fixture.Target, "check-tasks " + prefix, _fixture.Directory, false, false,
+            _fixture.SessionId, _fixture.Target, "check-tasks " + prefix, _fixture.Directory, false,
             prefix, () => _fixture.SessionId, default));
         Assert.Equal("0", File.ReadAllText(Path.Combine(_fixture.Directory, "tasks-at-target-start.txt")));
         // The scheduler worker exits after its receipt; deleting its definition must not

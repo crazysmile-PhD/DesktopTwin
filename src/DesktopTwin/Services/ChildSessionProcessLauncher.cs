@@ -16,7 +16,7 @@ namespace DesktopTwin.Services;
 /// 把目标程序启动到指定的分身会话中。
 ///
 /// 用临时任务进入指定会话；连接独立代理后先删除并查验任务，再授权启动目标。
-/// 成功以目标窗口或代理消息循环的实际回执确认，不从 RunEx 返回值推断。
+/// 成功以目标窗口的实际回执确认，不从 RunEx 返回值推断。
 /// </summary>
 public static class ChildSessionProcessLauncher
 {
@@ -88,7 +88,7 @@ public static class ChildSessionProcessLauncher
         var workingDirectory = Path.GetDirectoryName(fullPath) ?? AppContext.BaseDirectory;
         return TrackLaunch(token => LaunchWithTemporaryTaskAsync(
             childSessionId, fullPath, arguments ?? string.Empty, workingDirectory,
-            runAsAdministrator, agent: false, TaskNamePrefix, ChildSessionNativeMethods.TryGetChildSessionId, token), cancellationToken);
+            runAsAdministrator, TaskNamePrefix, ChildSessionNativeMethods.TryGetChildSessionId, token), cancellationToken);
     }
 
     private static Task TrackLaunch(Func<CancellationToken, Task> launch, CancellationToken token)
@@ -100,7 +100,7 @@ public static class ChildSessionProcessLauncher
             var task = Task.Run(async () =>
             {
                 using (linked) await launch(linked.Token).ConfigureAwait(false);
-            }, CancellationToken.None); // Always enter the delegate to dispose the linked source and run cleanup.
+            }, CancellationToken.None); // Enter the delegate even after cancellation to dispose and clean up.
             ActiveLaunches.Add(task);
             _ = task.ContinueWith(completed =>
             {
@@ -443,29 +443,8 @@ public static class ChildSessionProcessLauncher
         }
     }
 
-    /// <summary>代理必须回报热键注册和消息循环就绪后才返回成功。</summary>
-    internal static async Task<bool> RunInSessionAsync(uint sessionId, string executablePath,
-        string arguments, string taskNamePrefix, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var path = ValidateExecutablePath(executablePath);
-            await TrackLaunch(token => LaunchWithTemporaryTaskAsync(sessionId, path, arguments,
-                Path.GetDirectoryName(path) ?? string.Empty, false, true, taskNamePrefix, ChildSessionNativeMethods.TryGetChildSessionId, token),
-                cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or COMException
-            or UnauthorizedAccessException or System.Security.SecurityException or IOException
-            or TimeoutException or System.ComponentModel.Win32Exception)
-        {
-            AppLog.Warn("在分身会话里启动代理未确认成功。", exception);
-            return false;
-        }
-    }
-
     internal static async Task LaunchWithTemporaryTaskAsync(uint childSessionId, string executablePath,
-        string arguments, string workingDirectory, bool runAsAdministrator, bool agent,
+        string arguments, string workingDirectory, bool runAsAdministrator,
         string taskNamePrefix, Func<uint?> getSessionId, CancellationToken cancellationToken)
     {
         void ValidateSession()
@@ -547,7 +526,7 @@ public static class ChildSessionProcessLauncher
                     // Last authorization point: the temporary task is already verified absent.
                     ValidateSession();
                     return channel.LaunchAndConfirmAsync(executablePath, arguments, workingDirectory,
-                        agent, cancellationToken);
+                        cancellationToken);
                 }, cancellationToken).ConfigureAwait(false);
         }
         finally

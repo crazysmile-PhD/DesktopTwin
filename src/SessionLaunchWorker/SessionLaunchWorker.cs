@@ -8,9 +8,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using DesktopTwin.Launching;
 
-namespace DesktopTwinSessionAgent
+namespace DesktopTwinSessionLaunchWorker
 {
-    // A short-lived worker in the destination desktop, separate from the hotkey agent.
+    // A short-lived worker in the destination desktop, with no resident mode.
     // It waits for the host to remove the bootstrap task BEFORE receiving a launch request.
     internal static class SessionLaunchWorker
     {
@@ -34,7 +34,7 @@ namespace DesktopTwinSessionAgent
                         if (reader.ReadInt32() != SessionLaunchProtocol.Version)
                             throw new IOException("Unsupported launch protocol.");
                         return new Request(reader.ReadString(), reader.ReadString(), reader.ReadString(),
-                            reader.ReadInt32(), reader.ReadBoolean(), reader.ReadInt32());
+                            reader.ReadInt32(), reader.ReadInt32());
                     });
                     if (!request.Wait(SessionLaunchProtocol.ConnectionMilliseconds)) return 3;
                     var value = request.Result;
@@ -54,10 +54,9 @@ namespace DesktopTwinSessionAgent
         {
             internal readonly string Path, Arguments, Directory;
             internal readonly int SessionId;
-            internal readonly bool Agent;
             internal readonly int ObservationMilliseconds;
-            internal Request(string path, string arguments, string directory, int sessionId, bool agent, int milliseconds)
-            { Path = path; Arguments = arguments; Directory = directory; SessionId = sessionId; Agent = agent;
+            internal Request(string path, string arguments, string directory, int sessionId, int milliseconds)
+            { Path = path; Arguments = arguments; Directory = directory; SessionId = sessionId;
                 ObservationMilliseconds = milliseconds; }
         }
 
@@ -66,52 +65,45 @@ namespace DesktopTwinSessionAgent
             Process target = null;
             int pid = 0;
             long started = 0;
-            string eventName = @"Local\DesktopTwin.AgentReady." + Guid.NewGuid().ToString("N");
-            using (var readyEvent = new EventWaitHandle(false, EventResetMode.ManualReset, eventName))
+            try
             {
-                try
+                if (disconnected.IsCompleted) return 5;
+                var info = new ProcessStartInfo(request.Path, request.Arguments);
+                info.WorkingDirectory = request.Directory;
+                info.UseShellExecute = false;
+                target = Process.Start(info);
+                if (target == null) throw new InvalidOperationException("未取得目标进程。");
+                pid = target.Id;
+                started = target.StartTime.ToUniversalTime().Ticks;
+                if (target.SessionId != request.SessionId)
+                    throw new InvalidOperationException("目标进程不在请求的会话中。");
+
+                var clock = Stopwatch.StartNew();
+                while (clock.ElapsedMilliseconds < request.ObservationMilliseconds)
                 {
                     if (disconnected.IsCompleted) return 5;
-                    var info = new ProcessStartInfo(request.Path, request.Arguments
-                        + (request.Agent ? " --ready-event " + eventName : string.Empty));
-                    info.WorkingDirectory = request.Directory;
-                    info.UseShellExecute = false;
-                    target = Process.Start(info);
-                    if (target == null) throw new InvalidOperationException("未取得目标进程。");
-                    pid = target.Id;
-                    started = target.StartTime.ToUniversalTime().Ticks;
-                    if (target.SessionId != request.SessionId)
-                        throw new InvalidOperationException("目标进程不在请求的会话中。");
-
-                    var clock = Stopwatch.StartNew();
-                    while (clock.ElapsedMilliseconds < request.ObservationMilliseconds)
+                    if (target.HasExited)
+                        throw new InvalidOperationException("目标进程在就绪确认前退出，退出码 " + target.ExitCode + "。");
+                    target.Refresh();
+                    IntPtr window = FindResponsiveWindow(pid);
+                    bool ready = window != IntPtr.Zero;
+                    if (ready && !target.HasExited)
                     {
-                        if (disconnected.IsCompleted) return 5;
-                        if (target.HasExited)
-                            throw new InvalidOperationException("目标进程在就绪确认前退出，退出码 " + target.ExitCode + "。");
-                        target.Refresh();
-                        IntPtr window = request.Agent ? IntPtr.Zero : FindResponsiveWindow(pid);
-                        bool ready = request.Agent ? readyEvent.WaitOne(0) : window != IntPtr.Zero;
-                        if (ready && !target.HasExited)
-                        {
-                            SessionLaunchProtocol.WriteResult(writer, true, pid, request.SessionId,
-                                started, window.ToInt64(), string.Empty);
-                            return 0;
-                        }
-                        Thread.Sleep(50);
+                        SessionLaunchProtocol.WriteResult(writer, true, pid, request.SessionId,
+                            started, window.ToInt64(), string.Empty);
+                        return 0;
                     }
-                    throw new TimeoutException(request.Agent
-                        ? "代理未确认热键注册及消息循环就绪。"
-                        : "进程已创建，但未在确认期限内观察到可见且可响应的窗口；请检查分身桌面，避免重复启动。");
+                    Thread.Sleep(50);
                 }
-                catch (Exception error)
-                {
-                    SessionLaunchProtocol.WriteResult(writer, false, pid, request.SessionId, started, 0,
-                        error.GetBaseException().Message);
-                    return 1;
-                }
-                finally { if (target != null) target.Dispose(); }
+                throw new TimeoutException("进程已创建，但未在确认期限内观察到可见且可响应的窗口；请检查分身桌面，避免重复启动。");
             }
+            catch (Exception error)
+            {
+                SessionLaunchProtocol.WriteResult(writer, false, pid, request.SessionId, started, 0,
+                    error.GetBaseException().Message);
+                return 1;
+            }
+            finally { if (target != null) target.Dispose(); }
         }
 
         private static bool IsResponsiveWindow(IntPtr window)

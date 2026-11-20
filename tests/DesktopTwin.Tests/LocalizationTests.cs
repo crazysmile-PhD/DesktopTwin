@@ -32,9 +32,9 @@ public sealed class LocalizationTests
     [Fact]
     public void 键不区分大小写且值保留等号后面的内容()
     {
-        Locale.Load("Menu.UuSwitch.ToolTip=Use Ctrl+Alt+U = switch view");
+        Locale.Load("Menu.SendSystemShortcuts.ToolTip=Use Ctrl+Alt+Del = system shortcut");
 
-        Assert.Equal("Use Ctrl+Alt+U = switch view", Locale.Get("menu.uuswitch.tooltip"));
+        Assert.Equal("Use Ctrl+Alt+Del = system shortcut", Locale.Get("menu.sendsystemshortcuts.tooltip"));
     }
 
     [Fact]

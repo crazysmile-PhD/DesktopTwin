@@ -6,19 +6,18 @@ namespace DesktopTwin.Launching
     // Shared with the C# 5 / .NET Framework worker. No success is inferred from RunEx.
     internal static class SessionLaunchProtocol
     {
-        internal const int Version = 1;
+        internal const int Version = 2;
         internal const int ObservationMilliseconds = 30000;
         internal const int ConnectionMilliseconds = 15000;
 
         internal static void WriteRequest(BinaryWriter writer, string path, string arguments,
-            string directory, int sessionId, bool agent, int observationMilliseconds)
+            string directory, int sessionId, int observationMilliseconds)
         {
             writer.Write(Version);
             writer.Write(path);
             writer.Write(arguments);
             writer.Write(directory);
             writer.Write(sessionId);
-            writer.Write(agent);
             writer.Write(observationMilliseconds);
             writer.Flush();
         }

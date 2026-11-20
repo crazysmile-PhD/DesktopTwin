@@ -124,9 +124,7 @@ internal sealed class RdpActiveXHost : AxHost
             var hookMode = _sendSystemShortcutsToRemote ? 1 : 0;
             SetComProperty(securedSettings, "KeyboardHookMode", hookMode);
 
-            // 读回来确认：这个属性决定 RDP 是否装键盘钩子。
-            // 装了就表示组合键会被转发进远程会话，本地全局热键随之失效——
-            // 用户报「在分身里按热键没反应」时，这一行是第一个要看的地方。
+            // 读回来确认系统组合键的目标，便于排查主机与分身间的键盘转发。
             try
             {
                 var actual = GetComProperty(securedSettings, "KeyboardHookMode");

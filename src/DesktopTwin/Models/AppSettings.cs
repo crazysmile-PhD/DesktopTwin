@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace DesktopTwin.Models;
@@ -34,7 +34,7 @@ public sealed class AppSettings
     public WindowSettings Window { get; set; } = new();
 
     /// <summary>
-    /// 与外部工具联动、以及自动登录相关的可选设置。
+    /// 分身自动登录设置。
     /// </summary>
     public AutomationSettings Automation { get; set; } = new();
 
@@ -209,34 +209,9 @@ public sealed class WindowSettings
     public bool FullscreenBarPinned { get; set; }
 }
 
-/// <summary>
-/// 与外部工具联动、以及自动登录相关的可选设置。
-///
-/// 除「自动登录」外，这里的每一项都默认关闭：它们要么会结束本机别的进程（UU 视角切换），
-/// 要么会保存登录凭据（自动登录），必须由用户主动打开。
-/// 自动登录默认开启：它只是「尽量自动填」，没存密码时退回 RDP 的缓存凭据/手动输入，
-/// 本身不保存任何密码，不需要用户先做一次选择。
-/// </summary>
+/// <summary>分身自动登录设置。</summary>
 public sealed class AutomationSettings
 {
-    /// <summary>
-    /// 是否启用 UU 视角切换热键。
-    /// </summary>
-    public bool UuViewSwitchEnabled { get; set; }
-
-    /// <summary>
-    /// UU 视角切换的全局热键，形如 <c>Ctrl+Alt+U</c>。
-    /// </summary>
-    public string UuViewSwitchHotkey { get; set; } = "Ctrl+Alt+U";
-
-    /// <summary>
-    /// 是否启用 UU 视角锁定：定时检查串流端是否还在记录的会话里，跑掉了就自动切回。
-    ///
-    /// 与「UU 视角切换」相互独立。只开锁定时不注册热键、不安装分身内代理，
-    /// 记录值固定为电脑主机。
-    /// </summary>
-    public bool UuViewLockEnabled { get; set; }
-
     /// <summary>
     /// 是否启用分身自动登录。默认开启：没存密码时只尝试 RDP 记住的上一次凭据，
     /// 失败或没有就退回手动输入，不会静默改变任何东西。

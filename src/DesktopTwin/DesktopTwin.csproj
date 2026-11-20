@@ -4,7 +4,7 @@
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0-windows</TargetFramework>
 		<RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
-		<!-- Keep the single-file analyzer dependency identical during restore and publish. -->
+		<!-- Keep single-file analyzer dependencies identical during restore and publish. -->
 		<EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
 		<RootNamespace>DesktopTwin</RootNamespace>
 		<AssemblyName>DesktopTwin</AssemblyName>
@@ -32,7 +32,6 @@
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
 		<PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.135" />
 		<PackageReference Include="WPF-UI" Version="4.2.0" />
-		<PackageReference Include="System.Management" Version="10.0.15" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -46,34 +45,26 @@
 		<Compile Include="..\Shared\SessionLaunchProtocol.cs" Link="Launching\SessionLaunchProtocol.cs" />
 	</ItemGroup>
 
-	<!-- ===== 分身端代理 =====
-	     用 Windows 自带的 .NET Framework csc（任何 Windows 10/11 都自带）把
-	     src/SessionAgent 编译成 WinExe：GUI 子系统进程不分配控制台，从根上消除
-	     「分身里常驻一个 PowerShell 窗口」；启动也是毫秒级，不会因为冷启动慢
-	     被主程序误判成掉线。产物作为嵌入资源打进主程序，发布仍是单文件。
-
-	     所有属性都在 Target 内部求值：IntermediateOutputPath 在项目求值阶段还是空的，
-	     写在 Target 外面的 PropertyGroup 里会得到相对路径，产物会落到项目目录里，
-	     再被 **/*.cs 通配进来，导致「MainWindow 重复定义」这类莫名其妙的编译错误。 -->
-	<Target Name="BuildSessionAgent" BeforeTargets="PrepareForBuild">
+	<!-- 一次性会话启动代理：使用 Windows 自带 Framework 编译器，不常驻、不安装自启项。 -->
+	<Target Name="BuildSessionLaunch" BeforeTargets="PrepareForBuild">
 		<PropertyGroup>
-			<SessionAgentSource>$(MSBuildThisFileDirectory)..\SessionAgent\SessionAgentProgram.cs</SessionAgentSource>
-			<SessionLaunchWorkerSource>$(MSBuildThisFileDirectory)..\SessionAgent\SessionLaunchWorker.cs</SessionLaunchWorkerSource>
+			<SessionLaunchSource>$(MSBuildThisFileDirectory)..\SessionLaunchWorker\SessionLaunchProgram.cs</SessionLaunchSource>
+			<SessionLaunchWorkerSource>$(MSBuildThisFileDirectory)..\SessionLaunchWorker\SessionLaunchWorker.cs</SessionLaunchWorkerSource>
 			<SessionLaunchProtocolSource>$(MSBuildThisFileDirectory)..\Shared\SessionLaunchProtocol.cs</SessionLaunchProtocolSource>
-			<SessionAgentManifest>$(MSBuildThisFileDirectory)..\SessionAgent\app.manifest</SessionAgentManifest>
-			<SessionAgentIcon>$(MSBuildProjectDirectory)\Assets\DesktopTwin.ico</SessionAgentIcon>
-			<SessionAgentOutput>$(IntermediateOutputPath)DesktopTwin.Agent.exe</SessionAgentOutput>
-			<SessionAgentCompiler>$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319\csc.exe</SessionAgentCompiler>
-			<SessionAgentCompiler Condition="!Exists('$(SessionAgentCompiler)')">$(WINDIR)\Microsoft.NET\Framework\v4.0.30319\csc.exe</SessionAgentCompiler>
+			<SessionLaunchManifest>$(MSBuildThisFileDirectory)..\SessionLaunchWorker\app.manifest</SessionLaunchManifest>
+			<SessionLaunchIcon>$(MSBuildProjectDirectory)\Assets\DesktopTwin.ico</SessionLaunchIcon>
+			<SessionLaunchOutput>$(IntermediateOutputPath)DesktopTwin.LaunchWorker.exe</SessionLaunchOutput>
+			<SessionLaunchCompiler>$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319\csc.exe</SessionLaunchCompiler>
+			<SessionLaunchCompiler Condition="!Exists('$(SessionLaunchCompiler)')">$(WINDIR)\Microsoft.NET\Framework\v4.0.30319\csc.exe</SessionLaunchCompiler>
 		</PropertyGroup>
 
-		<Error Condition="!Exists('$(SessionAgentCompiler)')"
-		       Text="找不到 .NET Framework 的编译器，无法构建分身端代理。" />
+		<Error Condition="!Exists('$(SessionLaunchCompiler)')"
+		       Text="找不到 .NET Framework 的编译器，无法构建程序启动代理。" />
 		<MakeDir Directories="$(IntermediateOutputPath)" />
-		<Exec Command="&quot;$(SessionAgentCompiler)&quot; /nologo /warn:4 /warnaserror+ /target:winexe /optimize+ /win32manifest:&quot;$(SessionAgentManifest)&quot; /win32icon:&quot;$(SessionAgentIcon)&quot; /out:&quot;$(SessionAgentOutput)&quot; /reference:System.dll /reference:System.Core.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll &quot;$(SessionAgentSource)&quot; &quot;$(SessionLaunchWorkerSource)&quot; &quot;$(SessionLaunchProtocolSource)&quot;" />
+		<Exec Command="&quot;$(SessionLaunchCompiler)&quot; /nologo /warn:4 /warnaserror+ /target:winexe /optimize+ /win32manifest:&quot;$(SessionLaunchManifest)&quot; /win32icon:&quot;$(SessionLaunchIcon)&quot; /out:&quot;$(SessionLaunchOutput)&quot; /reference:System.dll /reference:System.Core.dll &quot;$(SessionLaunchSource)&quot; &quot;$(SessionLaunchWorkerSource)&quot; &quot;$(SessionLaunchProtocolSource)&quot;" />
 
 		<ItemGroup>
-			<EmbeddedResource Include="$(SessionAgentOutput)" LogicalName="DesktopTwin.Agent.exe" />
+			<EmbeddedResource Include="$(SessionLaunchOutput)" LogicalName="DesktopTwin.LaunchWorker.exe" />
 		</ItemGroup>
 	</Target>
 

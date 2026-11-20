@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace DesktopTwin.Localization;
 
@@ -61,21 +61,6 @@ internal static class Strings
         Pair("Menu.SendSystemShortcuts.ToolTip", "勾选后，Alt+Tab、Windows 键等系统组合键发送到桌面分身；取消勾选后在本机生效。切换时会自动重新连接 RDP。"),
         Pair("Menu.SendWinD", "发送 Win+D 显示桌面"),
         Pair("Menu.SendWinTab", "发送 Win+Tab 切换窗口"),
-
-        // ---- UU 视角切换 ----
-        Pair("Menu.UuSwitch.Enabled", "UU 视角切换（已启用 · {0}）"),
-        Pair("Menu.UuSwitch.Disabled", "UU 视角切换"),
-        Pair("Menu.UuSwitch", "启用 UU 视角切换（{0}）"),
-        Pair("Menu.UuSwitch.ToolTip", "启用后可用全局热键在「UU 控制整台电脑」与「UU 控制桌面分身」之间切换。切换时会结束 UU 的串流端进程，让 UU 服务重新挑选会话；分身只是断开，不会注销。"),
-        Pair("Menu.UuHotkey", "切换快捷键：{0}"),
-        Pair("Menu.UuTrigger", "立即切换一次"),
-        Pair("Notify.Hotkey.Failed.Message", "{0}\n快捷键没有生效，请从窗口菜单里重新设置一个未被占用的组合。"),
-        Pair("Menu.UuViewLock", "UU 视角锁定"),
-        Pair("Menu.UuViewLock.ToolTip", "记录控制目标，在会话或 UU 串流端变化时检查。手动切换优先；自动纠正最多三次，仍不稳定就关闭并提示。只勾锁定时目标固定为电脑主机，不安装分身代理。"),
-        Pair("Notify.UuLockFailed.Title", "UU 视角锁定已停止"),
-        Pair("Notify.UuLockFailed.Message", "无法监听桌面变化，或连续三次纠正后目标仍不稳定。请查看日志，确认手动切换正常后再开启锁定。"),
-        Pair("Menu.UuRepair", "修复 UU 串流（重启 UU 服务）"),
-        Pair("Menu.UuRepair.ToolTip", "手动重启 UU 串流服务。完成后请在手机端重新连接并确认目标；程序不会继续无限恢复服务。"),
 
         // ---- 自动登录 ----
         Pair("Menu.AutoLogin.Enabled", "自动登录分身（已启用）"),
@@ -167,38 +152,8 @@ internal static class Strings
         Pair("Resolution.Error.OutOfRange", "分辨率必须在 {0}×{1} 到 {2}×{3} 之间。"),
 
         // ---- 快捷键设置对话框 ----
-        Pair("Hotkey.Title", "设置切换快捷键"),
-        Pair("Hotkey.Intro", "把光标放在这个窗口里，直接按下想要的组合键。"),
-        Pair("Hotkey.Hint", "请按下新的组合键（需要包含 Ctrl / Alt / Shift / Win 之一，Esc 取消）"),
-        Pair("Hotkey.NeedModifier", "需要搭配 Ctrl / Alt / Shift / Win"),
-        Pair("Hotkey.Unsupported", "这个键不支持，换一个"),
 
         // ---- 视角切换的提示与结果 ----
-        Pair("Uu.Switching.Title", "正在切换视角"),
-        Pair("Uu.Switching.Message", "正在调整会话落点，请稍候…"),
-        Pair("Uu.Done.Title", "视角切换完成"),
-        Pair("Uu.Failed.Title", "视角切换失败"),
-        Pair("Uu.Repair.Title", "正在修复 UU 串流"),
-        Pair("Uu.Repair.Message", "正在重启 UU 服务…"),
-        Pair("Uu.Repair.Done", "UU 串流已修复"),
-        Pair("Uu.Repair.Failed", "UU 串流修复失败"),
-        Pair("Uu.Result.Busy", "上一次切换还没结束，已忽略本次。"),
-        Pair("Uu.Result.Cancelled", "切换已取消。"),
-        Pair("Uu.Result.Failed", "切换失败：{0}"),
-        Pair("Uu.Result.DisconnectFailed", "分身会话没能断开，请稍后重试。"),
-        Pair("Uu.Result.NotConnected", "分身没能连上。请在窗口里手动点「启动并连接」。"),
-        Pair("Uu.Result.NoSession", "分身会话不存在，请在窗口里手动点「启动并连接」。"),
-        Pair("Uu.Result.ToMain", "已确认 UU 串流端位于「整台电脑」。分身保持断开，里面的程序继续运行。"),
-        Pair("Uu.Result.ToMain.NoStreamer", "分身已断开。当前没有 UU 串流端，请连接 UU 后确认控制目标。"),
-        Pair("Uu.Result.ToMain.StreamerStuck", "15 秒内未确认 UU 串流端落到主桌面。请重新连接 UU，或手动执行「修复 UU 串流」。"),
-        Pair("Uu.Result.ToChild", "已切回「桌面分身」，重新连一下 UU 就进游戏桌面。"),
-        Pair("Uu.Result.ToChild.NoStreamer", "分身已连接。当前没有 UU 串流端，请连接 UU 后确认控制目标。"),
-        Pair("Uu.Result.StreamerKillFailed", "有 UU 串流端进程但无法结束，切换可能没有生效，请手动结束后重试。"),
-        Pair("Uu.Result.StreamerKillFailed.NotRestored", "有 UU 串流端进程但无法结束，切换没有生效，且分身连接未能恢复。请手动结束该进程后重新连接。"),
-        Pair("Uu.Result.ToChild.StreamerStuck", "15 秒内未确认 UU 串流端落到分身。请重新连接 UU，或手动执行「修复 UU 串流」。"),
-        Pair("Uu.Result.ServiceRestarted", "UU 服务已重启，串流端已重新拉起。"),
-        Pair("Uu.Result.ServiceRestarted.NoStreamer", "UU 服务已运行，当前未检测到串流端。请在手机端连接并确认设备状态。"),
-        Pair("Uu.Result.ServiceRestartFailed", "重启 UU 服务失败（停止{0}、启动失败）。请在服务管理器里手动重启 GameViewerService。"),
         // ---- 诊断与修复面板 ----
         Pair("Diag.Title", "诊断与修复"),
         Pair("Diag.StartupFailed.Title", "启动失败"),
@@ -408,22 +363,6 @@ internal static class Strings
         Pair("App.AlreadyRunning", "DesktopTwin 已经在运行了。\n\n请切换到已打开的窗口（可能在任务栏）。"),
         Pair("App.UnhandledError", "发生未处理的错误：{0}\n\n详细信息已写入日志。"),
 
-        // ---- 全局热键注册失败 ----
-        Pair("Hotkey.Error.Unrecognized", "无法识别的组合键：{0}"),
-        Pair("Hotkey.Error.NeedModifier", "全局热键必须包含 Ctrl / Alt / Shift / Win 之一。"),
-        Pair("Hotkey.Error.NoWindow", "窗口尚未创建，无法注册热键。"),
-        Pair("Hotkey.Error.NoMessageSource", "无法取得窗口消息源，注册热键失败。"),
-        Pair("Hotkey.Error.Occupied", "组合键 {0} 已被其他程序占用，换一个试试。"),
-        Pair("Hotkey.Error.RegisterFailed", "注册热键失败（Win32 错误 {0}）。"),
-
-        // ---- 分身端 ----
-        Pair("Agent.Error.ReleaseFailed", "释放分身端失败：{0}"),
-        Pair("Agent.Error.UpdateRolledBack", "分身端更新失败，已回滚到旧版本（当前仍可正常使用，下次启动会重试）。"),
-        Pair("Agent.Error.RunKeyFailed", "写自启项失败：{0}"),
-        Pair("Agent.Started", "已确认分身会话 {0} 的代理热键及消息循环就绪。"),
-        Pair("Agent.StartFailed", "在分身会话 {0} 里启动分身端失败，下次登录时由自启项兜底。"),
-        Pair("Agent.EmbeddedMissing", "程序内没有找到内嵌的分身端（DesktopTwin.Agent.exe）。这是打包错误，请重新安装。"),
-
         Pair("Dialog.SelectProgram.Title", "选择要在桌面分身中启动的程序"),
         Pair("Dialog.SelectProgram.Filter", "Windows 程序 (*.exe)|*.exe"),
         Pair("Startup.FirstRun.Title", "首次使用说明"),
@@ -509,10 +448,6 @@ internal static class Strings
         Pair("Notify.RelativeMouse.Requested", "已请求相对鼠标模式。请在目标游戏中验证转视角；若操作异常，可取消勾选并重新连接。"),
         Pair("Notify.RelativeMouse.Disabled", "已关闭相对鼠标模式。"),
         Pair("Notify.RelativeMouse.Unavailable", "当前 Windows/RDP 未完整接受鼠标设置，无法确认所选模式可用。连接继续，详细原因见日志。"),
-        Pair("Hotkey.Registered.Failed.Title", "快捷键注册失败"),
-        Pair("Notify.UuEnabled.Title", "UU 视角切换已启用"),
-        Pair("Notify.UuEnabled.Message", "按 {0} 可在「整台电脑」与「桌面分身」之间切换。"),
-        Pair("Notify.UuEnabled.Message.Agent", "按 {0} 可在「整台电脑」与「桌面分身」之间切换。分身画面内由分身端接管，同样有效。"),
         Pair("AutoLogin.Verify.Unknown", "无法校验这组凭据（错误 {0}）。请确认账户类型后重试。"),
         Pair("AutoLogin.Verify.BadPassword", "密码不正确，或 Microsoft 帐户密码未同步（网络问题）。"),
         Pair("AutoLogin.Verify.AccountLocked", "该账户已被锁定（连续输错次数过多）。请等待解锁后再试，期间不要反复尝试。"),
@@ -537,8 +472,6 @@ internal static class Strings
         Pair("AutoLogin.Unavailable.Message", "当前运行环境没有初始化自动登录服务。"),
         Pair("Notify.ResolutionMismatch.Title", "分辨率与屏幕不一致"),
         Pair("Notify.ResolutionMismatch.Message", "桌面分身当前是 {0} × {1}，屏幕是 {2} × {3}。全屏下画面会被拉伸，内容可能模糊；建议在「控制中心 → 桌面分辨率」里改为 {2} × {3}。"),
-        Pair("Notify.UuDisabled.Title", "已关闭 UU 视角切换"),
-        Pair("Notify.UuDisabled.Message", "热键已注销，不会影响其他程序。"),
         Pair("Startup.ElevatedLaunch.Message", "即将以管理员权限在桌面分身中启动：{0}{1}\n\n请确认这是你要运行的程序。"),
         Pair("Startup.ElevatedLaunch.Title", "确认以管理员权限启动"),
         Pair("Notify.TargetSelected.Title", "已选择目标程序"),
@@ -546,9 +479,6 @@ internal static class Strings
 
         Pair("Common.Success", "成功"),
         Pair("Common.Failed", "失败"),
-        Pair("Uu.Result.ServiceRestartFailed2", "重启 UU 服务失败（停止{0}、启动失败）。请在服务管理器里手动重启 GameViewerService。"),
-        Pair("Uu.Result.ServiceStopFailed", "无法停止 UU 服务（GameViewerService），本次重启没有继续。请在服务管理器里手动重启它。"),
-        Pair("Uu.Result.ServiceStartFailed", "UU 服务已停止但没能重新启动。请在服务管理器里手动启动 GameViewerService。"),
         Pair("AutoLogin.System.NotFound", "找不到 netplwiz.exe，请手动按 Win+R 输入 netplwiz 打开。"),
         Pair("AutoLogin.System.NotStarted", "系统设置没有启动起来，请手动按 Win+R 输入 netplwiz。"),
         Pair("AutoLogin.System.OpenError", "无法打开系统设置：{0}"),
