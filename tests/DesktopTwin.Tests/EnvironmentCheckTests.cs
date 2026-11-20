@@ -14,6 +14,50 @@ namespace DesktopTwin.Tests;
 /// </summary>
 public sealed class EnvironmentCheckTests
 {
+    [Fact]
+    public async Task ConnectionPreflightDoesNotWaitForDiagnosticScans()
+    {
+        var type = typeof(ChildSessionEnvironmentCheck);
+        var scanGate = type.GetField("ScanGate", System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Static)?.GetValue(null)
+            ?? throw new MissingFieldException("ScanGate");
+        var termsrvGate = type.GetField("TermsrvGate", System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Static)?.GetValue(null)
+            ?? throw new MissingFieldException("TermsrvGate");
+        using var release = new ManualResetEventSlim();
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holder = new Thread(() =>
+        {
+            lock (scanGate)
+            lock (termsrvGate)
+            {
+                held.SetResult();
+                release.Wait(TimeSpan.FromSeconds(10));
+            }
+        }) { IsBackground = true };
+        holder.Start();
+
+        try
+        {
+            await held.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // 正在进行的完整扫描不能成为连接预检的隐式等待。
+            var issues = await Task.Run(ChildSessionEnvironmentCheck.CollectForConnection)
+                .WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.DoesNotContain(issues, issue => issue.Id.StartsWith("rdp-tool-persistence",
+                StringComparison.Ordinal) || issue.Id == "termsrv-dll-tampered");
+        }
+        finally { release.Set(); }
+    }
+
+    [Fact]
+    public void ConnectionPreflightRetainsAllBlockingDiagnostics()
+    {
+        var quick = ChildSessionEnvironmentCheck.CollectForConnection();
+        var full = ChildSessionEnvironmentCheck.Collect();
+        foreach (var issue in full.Where(issue => issue.IsBlocking))
+            Assert.Contains(quick, candidate => candidate.Id == issue.Id && candidate.IsBlocking);
+    }
+
     private static string NativePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "termsrv.dll");
 

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -130,8 +130,10 @@ public partial class MainWindow : FluentWindow
         _settings = settings;
         _barPinned = settings.Current.Window.FullscreenBarPinned;
         DataContext = viewModel;
-        InitializeComponent();
-        RdpFormsHost.Child = RdpHost;
+        using (new PerformanceTrace("主窗口 XAML 加载"))
+            InitializeComponent();
+        using (new PerformanceTrace("RDP 宿主挂载"))
+            RdpFormsHost.Child = RdpHost;
 
         // Topmost 由 XAML 里的 OneWay 绑定驱动（MainWindow.xaml:20），
         // ViewModel 构造时已用设置里的值初始化 IsTopmost。
@@ -190,6 +192,7 @@ public partial class MainWindow : FluentWindow
     /// <inheritdoc />
     protected override void OnClosed(EventArgs e)
     {
+        using var timing = new PerformanceTrace("主窗口释放（热键、代理、UU 监听与 ActiveX）");
         if (DataContext is MainWindowViewModel viewModel)
         {
             viewModel.Detach();
@@ -1229,7 +1232,8 @@ public partial class MainWindow : FluentWindow
         viewModel.NotifyFullscreenResolution(monitor.Right - monitor.Left, monitor.Bottom - monitor.Top);
     }
 
-    private async Task ConfirmAndLogoffAsync()    {
+    private async Task ConfirmAndLogoffAsync()
+    {
         _closeRequestInProgress = true;
         try
         {
@@ -1247,22 +1251,15 @@ public partial class MainWindow : FluentWindow
                 return;
             }
 
-            if (DataContext is MainWindowViewModel viewModel)
-            {
-                await viewModel.LogoffAndHideAsync();
-            }
-            else
-            {
-                await _childSessionService.LogoffAndHideAsync();
-            }
-
-            ExitApplication();
+            await ExitImmediatelyAsync();
         }
         finally
         {
             _closeRequestInProgress = false;
         }
     }
+
+    private bool _exitRequestInProgress;
 
     /// <summary>
     /// 立即退出，不弹确认框。供托盘「退出」使用。
@@ -1272,11 +1269,16 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     internal async Task ExitImmediatelyAsync()
     {
-        AllowClose = true;
+        if (_exitRequestInProgress) return;
+        _exitRequestInProgress = true;
+        using var timing = new PerformanceTrace("退出（注销请求至应用关闭）");
+
+        if (DataContext is MainWindowViewModel viewModel)
+            viewModel.IsSessionClosing = true;
 
         try
         {
-            await _childSessionService.LogoffAndHideAsync();
+            await _childSessionService.RequestLogoffForExitAsync();
         }
         catch (Exception exception) when (exception is InvalidOperationException
                                               or System.ComponentModel.Win32Exception
@@ -1285,13 +1287,7 @@ public partial class MainWindow : FluentWindow
             AppLog.Warn("退出时注销分身会话失败，仍继续退出。", exception);
         }
 
-        if (Application.Current is { } application)
-        {
-            application.Shutdown();
-            return;
-        }
-
-        Close();
+        ExitApplication();
     }
 
     /// <summary>

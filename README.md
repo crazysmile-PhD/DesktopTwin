@@ -8,6 +8,8 @@
 
 程序调用 Windows Child Session API，并用系统的 RDP ActiveX 控件显示子会话。它有另一套桌面、窗口和应用进程，仍使用本机 CPU、GPU、内存与当前账户可访问的文件。它不提供虚拟机或沙盒隔离，也不保证软件能双开。
 
+连接前只等待必要预检，保留全部阻塞项；计划任务、启动项和系统文件完整性由“诊断”按需完整检查。退出时等待 Windows 接受注销请求后关闭主程序，Windows 仍可能继续清理分身；“关闭系统 Child Sessions 功能”仍等待注销完成。
+
 微软将 Child Session 定义为绑定父会话的特殊本机回环远程桌面会话。系统同时只能有一个处于活动且已连接状态的子会话；父会话结束时子会话也会结束。详见 [Child Sessions](https://learn.microsoft.com/en-us/windows/win32/termserv/child-sessions)。本程序另有全局单实例限制。
 
 ## 使用
@@ -71,6 +73,8 @@ dotnet publish src/DesktopTwin/DesktopTwin.csproj -c Release -r win-x64 --self-c
 ```
 
 `publish\DesktopTwin.exe` 依赖同目录发布文件与目标机运行时。发布流程中的单文件/自带运行时选项见 [.github/workflows/build.yml](.github/workflows/build.yml)。源码 `main` 的修复不代表已存在对应版本的 Release 包。
+
+自带运行时单文件关闭程序集压缩，优先减少启动时解压工作，代价是 exe 更大；本地打包与 CI 使用相同设置。具体启动收益需在同一机器测量。日志中的“性能计时”区分应用首帧、必要预检、连接及注销阶段，详见[性能排查](docs/performance.md)。
 
 ## 设置、日志与文档
 

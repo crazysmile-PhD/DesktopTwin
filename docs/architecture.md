@@ -20,7 +20,9 @@
 
 ## 连接
 
-`StartAsync` 切回 UI Dispatcher，同一启动代际内共用未完成的启动任务。请求先校验代际，再决定是否共用。已有且实际活动的连接直接返回；已有会话的重连复用诊断结果，新建会话前的近期诊断快照可复用 30 秒。
+`StartAsync` 切回 UI Dispatcher，同一启动代际内共用未完成的启动任务。请求先校验代际，再决定是否共用。已有且实际活动的连接直接返回；已有会话的重连复用预检结果，新建会话前的近期预检快照可复用 30 秒。
+
+`CollectForConnection` 与完整 `Collect` 共用全部阻塞检查及廉价提示，但连接路径不等待计划任务、启动项扫描或触发 sfc 完整性验证。完整诊断保留在诊断面板；未做完整扫描不表示环境已全面验证。残留临时任务的后台清扫推迟到主窗口首帧之后。
 
 连接配置的目标固定为 `127.0.0.1`，并设置 `ConnectToChildSession`。本机图形优化由 `RdpLocalGraphicsOptions` 在连接前分别尝试；失败不会阻断必要设置。控件返回成功不等于图形路径已协商成功。
 
@@ -38,7 +40,7 @@
 
 `StartGeneration` 使旧启动、首次重试及设置重试无法写回新操作。主动断开也推进启动代际，完成旧连接等待并清除自动启动意图。注销/释放还取消捕获的会话生命周期 token。
 
-注销先校验会话号、撤销旧意图，不等待程序启动占用的 COM 信号量。重复请求共用同一次注销。WTS 注销使用 `wait: false`，随后异步观察最多 15 秒；超时只表示程序未确认完成，不意味着 Windows 已停止清理。接口语义见 [WTSLogoffSession](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtslogoffsession)。
+注销先校验会话号、撤销旧意图，不等待程序启动占用的 COM 信号量。重复请求共用同一次注销。`SessionLogoffOperation` 区分请求接受与实际完成：WTS 注销使用 `wait: false`，普通注销/关闭系统功能随后异步观察最多 15 秒；窗口关闭及托盘退出只等待请求接受。退出期间仍阻止重新连接，释放资源时不重复下发已接受的注销。进程退出不证明 Windows 已完成清理；超时也只表示程序未确认完成。接口语义见 [WTSLogoffSession](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtslogoffsession)。
 
 取消是协作式的。已经进入系统或外部 COM 的调用不一定能被 token 中止；代码不会把“调用方不再等待”当成“底层操作已经结束”。退出时仍尽力请求注销子会话。
 
@@ -60,6 +62,7 @@
 - 诊断在打开、激活、手动重检和后台完整性校验完成时采集；采集在后台，界面只渲染快照。没有每两秒完整重扫。
 - 计划任务扫描保留 30 秒缓存；文件完整性校验在后台串行运行。读取失败和未验证结果不能作为正常证据。
 - 目标程序及代理的任务计划程序 COM 调用放到后台。启动排队受会话 token 取消，下发前复查会话身份。
+- `PerformanceTrace` 使用单调时钟记录阶段耗时；App 创建至首帧不包含此前的单文件解压、运行时加载或 UAC 等待。自带运行时单文件不启用程序集压缩，避免每次加载时的解压工作；它仍可能释放本机库，不等于完全无解包。
 
 代理源码位于 `src/SessionAgent/SessionAgentProgram.cs`，构建时用 Windows .NET Framework 编译器生成独立 `DesktopTwin.Agent.exe`，再嵌入主程序。不是主程序的 `--session-agent` 模式。
 
