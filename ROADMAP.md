@@ -4,13 +4,13 @@
 
 ## 先验证当前修复
 
-1. 在真实 Windows/RDP/UU 环境复核连接、切换、注销和退出；特别验证旧操作不会在注销后重新建会话。
+1. 在真实 Windows/RDP 环境复核连接、注销和退出；特别验证旧操作不会在注销后重新建会话。
 2. 按 [性能比较条件](docs/performance.md) 测游戏帧时间、显示输出、CPU 和 GPU 路径。确认共享帧缓冲/硬解的实际使用情况，再讨论进一步调优。
 3. 继续收敛设置重连和控件重连的所有权；在有明确失效场景时补边界测试，不再增加独立恢复循环。
 
 ## 再评估能力
 
-- 相对鼠标：已接入默认关闭的实验性原生 `AllowRelativeMouseMode` / `RelativeMouseMode`，支持设置重连及输入模式回调日志。属性配置与回读可独立验证；下一步在真实 Child Session 内验证相对位移事件、游戏转视角、窗口/全屏、观看模式和失焦后的行为。代理仍只监听热键，尚无独立输入转发或旧系统兜底。不承诺所有游戏可用。[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)
+- 相对鼠标：已接入默认关闭的实验性原生 `AllowRelativeMouseMode` / `RelativeMouseMode`，支持设置重连及输入模式回调日志。属性配置与回读可独立验证；下一步在真实 Child Session 内验证相对位移事件、游戏转视角、窗口/全屏、观看模式和失焦后的行为。一次性程序启动代理没有独立输入转发或旧系统兜底。不承诺所有游戏可用。[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)
 - 系统兼容性：收集 Windows 构建/SKU、显卡驱动、登录类型和策略的实际结果，再形成支持矩阵。
 - 分发与签名：仅在确定发布流程后描述具体渠道；签名不构成不再出现系统提示的保证。
 - 多屏与高 DPI：测试缩放、窗口位置、凭据对话框和全屏工具栏的组合。

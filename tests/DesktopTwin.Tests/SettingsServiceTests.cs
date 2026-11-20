@@ -38,11 +38,7 @@ public sealed class SettingsServiceTests : IDisposable
         // 首次运行提示默认未确认
         Assert.False(settings.ChildSessionNoticeAccepted);
 
-        // UU 视角切换默认关（会结束别的进程），自动登录默认开（没存密码时只尝试
-        // RDP 记住的上一次凭据、失败退回手动输入，本身不保存密码，无需用户先做选择）
-        Assert.False(settings.Automation.UuViewSwitchEnabled);
         Assert.True(settings.Automation.AutoLoginEnabled);
-        Assert.Equal("Ctrl+Alt+U", settings.Automation.UuViewSwitchHotkey);
 
         // 密码表默认是空的，且按键不区分大小写（多账户各存一份）
         Assert.Empty(settings.Automation.AutoLoginPasswords);
@@ -178,6 +174,34 @@ public sealed class SettingsServiceTests : IDisposable
 
         var json = File.ReadAllText(Path.Combine(_directory, "settings.json"));
         Assert.DoesNotContain("enc-legacy\",\n    \"AutoLoginPassword", json);
+    }
+
+    [Fact]
+    public void LegacyUuSettingsAreIgnoredAndRemovedOnSave()
+    {
+        var path = Path.Combine(_directory, "settings.json");
+        File.WriteAllText(path, """
+            {
+              "SettingsVersion": 1,
+              "Session": { "DesktopWidth": 2560 },
+              "Automation": {
+                "UuViewSwitchEnabled": true,
+                "UuViewLockEnabled": true,
+                "UuViewSwitchHotkey": "Ctrl+Alt+U",
+                "AutoLoginEnabled": false,
+                "AutoLoginUserName": "ExistingUser",
+                "AutoLoginPasswords": { "ExistingUser": "existing-password" }
+              }
+            }
+            """);
+
+        using var service = new SettingsService(_directory);
+        Assert.Equal(2560, service.Current.Session.DesktopWidth);
+        Assert.False(service.Current.Automation.AutoLoginEnabled);
+        Assert.Equal("ExistingUser", service.Current.Automation.AutoLoginUserName);
+        Assert.Equal("existing-password", service.Current.Automation.AutoLoginPasswords["existinguser"]);
+        service.Flush();
+        Assert.DoesNotContain("UuView", File.ReadAllText(path));
     }
 
     public void Dispose()

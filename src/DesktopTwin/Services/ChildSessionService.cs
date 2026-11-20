@@ -407,7 +407,7 @@ public sealed class ChildSessionService : IDisposable
     {
         ThrowIfDisposed();
 
-        // 后台的 UU 切换流程
+        // 后台调用方
         // 调过来时已经在池线程上，而下面要碰 RDP 控件和窗口。WPF 对象只认创建它的
         // 线程，不切回去就直接抛 InvalidOperationException——兜底反而成了故障点。
         if (_dispatcher.CheckAccess())
@@ -459,7 +459,7 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 同一次启动只跑一遍：两次启动叠在一起时（界面按钮与 UU 后台切回撞上），
+    /// 同一次启动只跑一遍：两次启动请求叠在一起时，
     /// 后到的那个等前一个的结果，不再单独发起一次连接尝试——
     /// 否则第一次尝试失败后，第二次的预检回来时会重新建一个尝试，用户要输两遍密码。
     /// </summary>
@@ -660,159 +660,6 @@ public sealed class ChildSessionService : IDisposable
         _windowHiddenByUser = true;
         _desktopWindow?.Hide();
         RefreshState(Locale.Get("Svc.Status.Hidden"));
-    }
-
-    /// <summary>
-    /// 断开分身桌面，但保留会话（桌面里的程序继续运行）。
-    ///
-    /// 供 UU 视角切换使用；串流端是否选择主机由切换服务另行确认。
-    /// </summary>
-    /// <returns>确实发起了断开返回 true。</returns>
-    public Task<bool> DisconnectDesktopForSwitchAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return _dispatcher.InvokeAsync(DisconnectDesktopForSwitchCore,
-            DispatcherPriority.Normal, cancellationToken).Task;
-    }
-
-    private bool DisconnectDesktopForSwitchCore()
-    {
-        ThrowIfDisposed();
-        var window = _desktopWindow;
-        // 主动断开也撤销尚在预检/重试中的启动，避免它稍后把分身连回来。
-        lock (_environmentGate) _startGeneration++;
-        _connectionAttemptCompletionSource?.TrySetResult(false);
-        _initialConnectionRetriesRemaining = 0;
-        _connectionRetryInProgress = false;
-        _autoLaunchPending = false;
-        _rdpSettingsReconnectActive = false;
-
-        // 先作废还在等的自动重连：它只认代际号，普通断开不会让它停下，
-        // 等「会话释放」结束后会把分身又连回来——和切到主桌面的目的相反。
-        // 放在状态判断之前：控件已经是 0 时也要取消。
-        // 两处都要：控件侧排队的重连，以及服务侧还在 Delay 里的那次重试。
-        _settingsReconnectGeneration++;
-        window?.RdpHost.CancelPendingReconnect();
-
-        // 在途的自动重连已经作废，这次连接不会再继续：凭据框监听也一并停掉，
-        // 否则它会一直盯到 60 秒上限，期间本机任何一个凭据框都可能被误填。
-        _autoLogin?.StopWatching();
-
-        if (window is null || window.RdpHost.ConnectedState == 0)
-        {
-            return false;
-        }
-
-        // 走 RDP 客户端的正常断开：这是「有意的断开」，
-        // 不会触发「RDP 连接意外断开」的失败提示与重试。
-        var disconnected = window.RdpHost.Disconnect();
-        RefreshState(disconnected
-            ? Locale.Get("Svc.Status.Disconnected")
-            : Locale.Get("Svc.Status.DisconnectFailed"));
-        return disconnected;
-    }
-
-    /// <summary>
-    /// 确保分身桌面处于已连接状态。会话不存在时走完整启动流程。
-    /// </summary>
-    /// <param name="cancellationToken">取消标记。</param>
-    /// <param name="existingSessionGeneration">自动纠正传入会话代际：仅重连现有会话，禁止启动。</param>
-    /// <returns>连接成功返回 true。</returns>
-    public Task<bool> EnsureDesktopConnectedAsync(
-        CancellationToken cancellationToken,
-        bool showWindow = true,
-        int? existingSessionGeneration = null)
-    {
-        ThrowIfDisposed();
-
-        // 同上：这里的每一步都是窗口/RDP 控件操作。
-        if (_dispatcher.CheckAccess())
-        {
-            return EnsureDesktopConnectedCoreAsync(cancellationToken, showWindow, existingSessionGeneration);
-        }
-
-        return _dispatcher
-            .InvokeAsync(() => EnsureDesktopConnectedCoreAsync(cancellationToken, showWindow, existingSessionGeneration))
-            .Task
-            .Unwrap();
-    }
-
-    private async Task<bool> EnsureDesktopConnectedCoreAsync(
-        CancellationToken cancellationToken,
-        bool showWindow,
-        int? existingSessionGeneration)
-    {
-        ThrowIfDisposed();
-
-        // 排队等 UI 线程期间可能已经被取消（切换超时、用户又按了一次热键）。
-        // 这里必须先看：再往下就会显示窗口、改连接状态，然后才在别处发现「已取消」，
-        // 于是一次已取消的切换照样改掉了桌面连接。
-        cancellationToken.ThrowIfCancellationRequested();
-        var operationGeneration = StartGeneration;
-        if (_sessionClosing) return false;
-
-        // 自动纠正的限制要跨过 Dispatcher 队列，在显示窗口或重连前检查。
-        if (existingSessionGeneration is { } expected
-            && (expected != StartGeneration || ChildSessionNativeMethods.TryGetChildSessionId() is null))
-        {
-            return false;
-        }
-
-        // Disconnect 的回调丢失时必须先复位；放在取消和代际校验之后，统一由 UI 线程操作。
-        var connectionPending = IsConnectionAttemptInProgress()
-            || _desktopWindow?.RdpHost.ConnectedState == 2;
-        if (!connectionPending) _desktopWindow?.RdpHost.ResetDisconnectState();
-        var window = EnsureDesktopWindow();
-        if (showWindow && !_windowHiddenByUser)
-        {
-            ShowDesktopWindow(window);
-        }
-
-        if (!connectionPending && (window.RdpHost.ConnectedState != 1
-            || ChildSessionNativeMethods.TryGetChildSessionId() is not { } connectedSession
-            || !ChildSessionNativeMethods.IsSessionActive(connectedSession)))
-        {
-            if (ChildSessionNativeMethods.TryGetChildSessionId() is null)
-            {
-                if (existingSessionGeneration.HasValue)
-                {
-                    return false;
-                }
-
-                // 手动操作允许重新启动；自动纠正永远不会走到这里。
-                await StartAsync(operationGeneration).ConfigureAwait(true);
-            }
-            else
-            {
-                // 会话还在（只是断开）：重新连回去，桌面上的程序都还在。
-                window.RdpHost.ReconnectToChildSession(DesktopSize);
-                RefreshState(Locale.Get("Svc.Status.Reconnecting"));
-            }
-        }
-
-        var deadline = DateTime.UtcNow + ConnectionTimeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (_sessionClosing || operationGeneration != StartGeneration)
-            {
-                return false;
-            }
-
-            if (window.RdpHost.ConnectedState == 1
-                && ChildSessionNativeMethods.TryGetChildSessionId() is { } id
-                && ChildSessionNativeMethods.IsSessionActive(id))
-            {
-                return true;
-            }
-
-            await Task.Delay(400, cancellationToken).ConfigureAwait(true);
-        }
-
-        return window.RdpHost.ConnectedState == 1
-            && operationGeneration == StartGeneration
-            && ChildSessionNativeMethods.TryGetChildSessionId() is { } finalId
-            && ChildSessionNativeMethods.IsSessionActive(finalId);
     }
 
     /// <summary>

@@ -13,7 +13,7 @@ DesktopTwin-{{VERSION}}-NET10.exe
 关闭并确认或退出会注销分身，结束里面的程序，请先保存。
 
 画面仍经过子会话和显示路径，不保证零延迟、固定帧率或固定内存占用。
-UU 切主机后分身保持断开；超时会报告未确认，不再无限恢复服务。
+本版移除 UU 切换、热键、视角锁定与串流修复；升级时清理旧版热键代理。
 
 当前使用与排查说明：
 https://github.com/crazysmile-PhD/DesktopTwin/blob/main/README.md
