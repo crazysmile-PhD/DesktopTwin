@@ -121,6 +121,11 @@ public sealed class SessionSettings
     public bool AudioMuted { get; set; }
 
     /// <summary>
+    /// 实验性原生相对鼠标，默认关闭。切换需重连；要求支持该能力的 RDP 控件和服务器。
+    /// </summary>
+    public bool RelativeMouseMode { get; set; }
+
+    /// <summary>
     /// 观看模式：仅显示画面，本机键鼠不会进入分身。
     /// </summary>
     public bool WatchMode { get; set; }

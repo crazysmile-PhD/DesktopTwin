@@ -13,6 +13,14 @@ dotnet test DesktopTwin.sln -c Release --no-build
 
 四步分别检查编译、XAML 绑定/资源、常量单一来源和测试。工作流定义在 `.github/workflows/build.yml`；其他 fork 需要自行检查 Actions 是否启用，没有运行记录不能写成 CI 通过。
 
+在 Windows 11 24H2 或更新且支持相对鼠标的机器上，还可运行独立原生控件冒烟检查：
+
+```powershell
+dotnet run --project tests/DesktopTwin.NativeSmoke/DesktopTwin.NativeSmoke.csproj -c Release
+```
+
+该检查创建自己的未连接控件，调用生产代码反复打开/关闭鼠标属性并回读，不创建、连接或注销子会话。它独立于解决方案单元测试，不是跨 Windows 版本兼容性检查，也不能证明游戏输入正常。
+
 ## 合并与发布
 
 `main` 要求通过 PR 合并、通过 `build` 检查、保持分支与目标分支同步并解决审查对话；禁止强制推送和删除，管理员也遵守规则。不要求额外审批人数，仓库维护者可合并通过检查的 PR。

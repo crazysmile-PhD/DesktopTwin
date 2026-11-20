@@ -28,6 +28,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         // 显示比例默认 1:1（文字最清晰的一档）；自适应缩放需要用户主动选
         Assert.False(settings.Session.SmartSizing);
+        Assert.False(settings.Session.RelativeMouseMode);
         Assert.True(settings.Session.KeepAspectRatio);
         Assert.True(settings.Launch.AutoLaunchOnConnect);
 
@@ -60,6 +61,7 @@ public sealed class SettingsServiceTests : IDisposable
             writer.Current.Session.DesktopWidth = 2560;
             writer.Current.Session.DesktopHeight = 1440;
             writer.Current.Session.AudioMuted = true;
+            writer.Current.Session.RelativeMouseMode = true;
             writer.Current.Launch.TargetPath = @"C:\Games\game.exe";
             writer.Current.Launch.RunAsAdministrator = true;
             writer.Current.ChildSessionNoticeAccepted = true;
@@ -71,6 +73,7 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(2560, reader.Current.Session.DesktopWidth);
         Assert.Equal(1440, reader.Current.Session.DesktopHeight);
         Assert.True(reader.Current.Session.AudioMuted);
+        Assert.True(reader.Current.Session.RelativeMouseMode);
         Assert.Equal(@"C:\Games\game.exe", reader.Current.Launch.TargetPath);
         Assert.True(reader.Current.Launch.RunAsAdministrator);
         Assert.True(reader.Current.ChildSessionNoticeAccepted);

@@ -10,7 +10,7 @@
 
 ## 再评估能力
 
-- 相对鼠标：当前代理只监听热键。先验证微软在 Windows 11 24H2 起提供的 `AllowRelativeMouseMode` 等能力是否适用于本项目场景，再决定是否需要独立输入转发。不要预先认定协议完全不支持，也不承诺所有游戏可用。[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)
+- 相对鼠标：已接入默认关闭的实验性原生 `AllowRelativeMouseMode` / `RelativeMouseMode`，支持设置重连及输入模式回调日志。属性配置与回读可独立验证；下一步在真实 Child Session 内验证相对位移事件、游戏转视角、窗口/全屏、观看模式和失焦后的行为。代理仍只监听热键，尚无独立输入转发或旧系统兜底。不承诺所有游戏可用。[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)
 - 系统兼容性：收集 Windows 构建/SKU、显卡驱动、登录类型和策略的实际结果，再形成支持矩阵。
 - 分发与签名：仅在确定发布流程后描述具体渠道；签名不构成不再出现系统提示的保证。
 - 多屏与高 DPI：测试缩放、窗口位置、凭据对话框和全屏工具栏的组合。

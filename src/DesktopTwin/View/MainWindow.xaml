@@ -266,6 +266,11 @@
                                                  Header="{loc:Loc Menu.UuRepair}"
                                                  ToolTip="{loc:Loc Menu.UuRepair.ToolTip}" />
                                 </ui:MenuItem>
+                                <ui:MenuItem Command="{Binding ToggleRelativeMouseModeCommand}"
+                                             Header="{loc:Loc Menu.RelativeMouseMode}"
+                                             IsCheckable="True"
+                                             IsChecked="{Binding IsRelativeMouseModeEnabled, Mode=OneWay}"
+                                             ToolTip="{loc:Loc Menu.RelativeMouseMode.ToolTip}" />
                                 <ui:MenuItem Header="{Binding AutoLoginMenuHeader}">
                                     <ui:MenuItem Command="{Binding ShowAutoLoginOptionsCommand}"
                                                  Header="{loc:Loc Menu.AutoLogin.Settings}"

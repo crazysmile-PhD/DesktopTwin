@@ -105,7 +105,7 @@ public sealed class ChildSessionService : IDisposable
 
     private readonly record struct SessionViewState(string Text, uint? SessionId, int Connection,
         bool Visible, bool Topmost, bool SmartSizing, bool AspectRatio, bool Shortcuts,
-        bool Muted, bool WatchMode, DrawingSize Size);
+        bool Muted, bool WatchMode, bool RelativeMouse, DrawingSize Size);
 
     /// <summary>
     /// 窗口是不是用户主动隐藏的。
@@ -195,6 +195,9 @@ public sealed class ChildSessionService : IDisposable
     /// </summary>
     public event EventHandler? AudioReconnectCompleted;
 
+    /// <summary>登录完成后报告鼠标设置的接受情况，包括初次连接与设置重连。</summary>
+    public event EventHandler? RelativeMouseModeConfigured;
+
     /// <summary>
     /// 因为目标程序要求管理员权限，自动启动被跳过，需要用户手动确认。
     /// </summary>
@@ -262,6 +265,17 @@ public sealed class ChildSessionService : IDisposable
     /// 分身声音是否关闭。
     /// </summary>
     public bool AudioMuted => _settings.Current.Session.AudioMuted;
+
+    /// <summary>是否请求实验性原生相对鼠标。</summary>
+    public bool RelativeMouseModeEnabled => _settings.Current.Session.RelativeMouseMode;
+
+    /// <summary>最近一次连接的鼠标设置是否被控件接受，不代表游戏输入已验证。</summary>
+    public bool RelativeMouseModeSettingsAccepted =>
+        _desktopWindow?.RdpHost.RelativeMouseModeSettingsAccepted == true;
+
+    /// <summary>最近一次连接配置时请求的鼠标模式，不含尚未应用的排队设置。</summary>
+    internal bool RelativeMouseModeConfiguredEnabled =>
+        _desktopWindow?.RdpHost.RelativeMouseModeConfiguredEnabled == true;
 
     /// <summary>
     /// 是否处于观看模式。
@@ -917,6 +931,28 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
+    /// 切换实验性相对鼠标，沿用既有的有界设置重连流程。
+    /// </summary>
+    /// <returns>是否触发了自动重连。</returns>
+    public bool SetRelativeMouseMode(bool enabled)
+    {
+        ThrowIfDisposed();
+        if (RelativeMouseModeEnabled == enabled)
+        {
+            return false;
+        }
+
+        _settings.Current.Session.RelativeMouseMode = enabled;
+        _settings.SaveSoon();
+        var window = EnsureDesktopWindow();
+        window.RdpHost.SetRelativeMouseMode(enabled);
+        return ReconnectForRdpSettingChange(
+            window,
+            RdpSettingChange.RelativeMouse,
+            enabled ? Locale.Get("Svc.Status.RelativeMouseOn") : Locale.Get("Svc.Status.RelativeMouseOff"));
+    }
+
+    /// <summary>
     /// 切换观看模式：开启后本机键鼠不会进入分身。
     /// </summary>
     public void SetWatchModeEnabled(bool enabled)
@@ -1142,7 +1178,7 @@ public sealed class ChildSessionService : IDisposable
 
         var state = new SessionViewState(StatusText, ChildSessionId, ConnectedState, IsDesktopVisible,
             TopmostEnabled, SmartSizingEnabled, KeepAspectRatio, SendSystemShortcutsToRemote,
-            AudioMuted, WatchModeEnabled, DesktopSize);
+            AudioMuted, WatchModeEnabled, RelativeMouseModeEnabled, DesktopSize);
         if (_publishedState != state)
         {
             _publishedState = state;
@@ -1419,6 +1455,7 @@ public sealed class ChildSessionService : IDisposable
         _desktopWindow.RdpHost.SetSmartSizing(_settings.Current.Session.SmartSizing);
         _desktopWindow.RdpHost.SetSendSystemShortcutsToRemote(SendSystemShortcutsToRemote);
         _desktopWindow.RdpHost.SetAudioMuted(AudioMuted);
+        _desktopWindow.RdpHost.SetRelativeMouseMode(RelativeMouseModeEnabled);
         return _desktopWindow;
     }
 
@@ -1706,6 +1743,11 @@ public sealed class ChildSessionService : IDisposable
         else
         {
             RefreshState(Locale.Get("Svc.Status.LoginInitialized"));
+        }
+
+        if (RelativeMouseModeEnabled || completedSettingChanges.HasFlag(RdpSettingChange.RelativeMouse))
+        {
+            RelativeMouseModeConfigured?.Invoke(this, EventArgs.Empty);
         }
 
         if (!_autoLaunchPending)
@@ -2109,6 +2151,7 @@ public sealed class ChildSessionService : IDisposable
         None = 0,
         SystemShortcuts = 1,
         Audio = 2,
-        Resolution = 4
+        Resolution = 4,
+        RelativeMouse = 8
     }
 }

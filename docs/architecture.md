@@ -26,6 +26,10 @@
 
 连接配置的目标固定为 `127.0.0.1`，并设置 `ConnectToChildSession`。本机图形优化由 `RdpLocalGraphicsOptions` 在连接前分别尝试；失败不会阻断必要设置。控件返回成功不等于图形路径已协商成功。
 
+实验性相对鼠标由 `SessionSettings.RelativeMouseMode` 保存，默认关闭。`RdpRelativeMouseOptions` 先允许 `AllowRelativeMouseMode`，再请求 `AdvancedSettings7.RelativeMouseMode`；任何一步不受支持，就尽力将两项复位为 false，继续连接并报告未完整接受。关闭时也显式复位两项，避免复用控件时遗留上一连接的模式。反射包装的 COM 错误同样按可选属性处理，程序错误不静默吞掉。
+
+鼠标设置通过 `ChildSessionService` 的既有设置重连入口合并，并沿用代际取消、注销与超时边界。登录完成后界面报告设置是否被接受；`OnMouseInputModeChanged` 仅记录控件报告的模式，不把属性接受或回调当成游戏兼容证明。原生控件负责鼠标输入与焦点，本功能不安装额外钩子、不自行锁定或隐藏本机光标、不经代理注入输入。[RelativeMouseMode](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpclientadvancedsettings6-relativemousemode)、[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)、[模式回调](https://learn.microsoft.com/en-us/windows/win32/termserv/imstscaxevents-onmouseinputmodechanged)。
+
 启动任务通过 `TaskCompletionSource` 等待登录完成回调，单次尝试预算 60 秒。首次连接错误最多自动重试一次，延迟 4 秒。超时本身不触发这一轮重试。设置重连保留最多三次服务层重试，延迟 2/4/8 秒；控件还会先等 1 秒及最多 10 秒会话释放。这些预算不是“整次操作只需几秒”的保证。
 
 设置重连也为每次实际尝试记录 60 秒截止时间。UI 状态采样发现回调缺失且预算到期时，会作废控件排队重连并报告超时；退避等待期间不使用上一轮截止时间，下一次尝试重新计时。待应用设置保留给下次显式连接。
