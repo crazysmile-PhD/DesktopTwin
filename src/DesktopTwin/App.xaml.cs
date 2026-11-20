@@ -33,7 +33,7 @@ public partial class App : Application
     private AutoLoginService? _autoLogin;
     private ChildSessionService? _childSessionService;
     private MainWindow? _mainWindow;
-    private TrayIconService? _trayIcon;
+    private TrayIconController? _trayIcon;
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
     private EventWaitHandle? _activateEvent;
@@ -132,19 +132,21 @@ public partial class App : Application
         };
 
         _autoLogin = new AutoLoginService(_settings);
-        _childSessionService = new ChildSessionService(_settings, _autoLogin);
+        _childSessionService = new ChildSessionService(_settings, service =>
+        {
+            _mainWindow = new MainWindow(service, _settings);
+            return new WpfDesktopSessionView(_mainWindow);
+        }, _autoLogin);
 
-        // 窗口由服务按需创建（首次显示或首次连接时），这里只负责触发显示，
-        // 避免出现「服务持有一个窗口、App 又建了一个窗口」的重复实例。
+        // 应用入口拥有具体视窗；会话服务按需请求工厂，不引用 WPF 视窗实现。
         using (new PerformanceTrace("主窗口构造与显示"))
             _childSessionService.ShowWindow();
-        _mainWindow = _childSessionService.Window;
         MainWindow = _mainWindow;
         if (_mainWindow is not null)
             _mainWindow.ContentRendered += OnFirstContentRendered;
 
         // 托盘图标常驻：窗口被隐藏后，这是唯一能把它叫回来的入口。
-        _trayIcon = new TrayIconService(_childSessionService);
+        _trayIcon = new TrayIconController(_childSessionService, () => _mainWindow);
     }
 
     private void OnFirstContentRendered(object? sender, EventArgs e)
@@ -272,7 +274,7 @@ public partial class App : Application
             // 窗口可能已被隐藏（「隐藏」按钮），ShowWindow 会重新显示它。
             _childSessionService.ShowWindow();
 
-            var window = _childSessionService.Window;
+            var window = _mainWindow;
             if (window is null)
             {
                 return;

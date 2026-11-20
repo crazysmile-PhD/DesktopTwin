@@ -9,9 +9,9 @@
 - CA1502 的方法圈复杂度上限为 25，CA1505 的可维护性指数下限为 20。CA1506 的类型耦合上限为 95、方法为 35，配置集中在 `build/CodeMetricsConfig.txt`。指标不能证明设计良好。
 - 三个项目提交 NuGet 锁文件，CI 以 locked mode 还原并审计直接和传递依赖。普通还原就纳入单文件分析器，避免发布时额外引入未锁定的 ILLink 依赖。
 - Debug、Release 均编译与测试，原生冒烟项目参与编译；测试有挂起诊断超时，作业有总超时。
-- 架构测试限制 Models 对 UI、存储、服务和原生操作的依赖；诊断历史不能依赖窗口或原生操作。服务只保留 `ChildSessionService`、`TrayIconService` 两处既有具体视窗依赖，不允许新增这样的服务。
+- 架构测试限制 Models 对 UI、存储、服务和原生操作的依赖；诊断历史不能依赖窗口或原生操作。所有服务均禁止依赖具体视窗，无豁免。会话端口与 DesktopSessionHost 不能依赖 WPF 或原生控件。
 - Release 测试必须实际执行、全部通过、零跳过；空或缺少 TRX、缺少覆盖率、缺少受保护类型均失败。异步方法生成的状态机也接受覆盖率门槛。
-- `build/coverage-policy.json` 对六个核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
+- `build/coverage-policy.json` 对核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。DesktopSessionHost 要求 95% 行、90% 分支覆盖率。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
 - 保留 XAML 绑定、资源、常量唯一来源检查。图标改为真实枚举成员精确匹配，程序集不存在时失败。
 - Actions 固定提交 SHA，Dependabot 每周检查 NuGet 和 Actions 更新。两种单文件包都接受锁定还原与分析器检查。
 
@@ -30,9 +30,18 @@
 
 ## 尚未解决的架构债务
 
-MainWindowViewModel、MainWindow、ChildSessionService、环境检查和 AutoLoginService 仍承担较多职责。UI 框架类型也计入耦合指标，不能仅凭数字判定缺陷；但会话编排仍持有窗口，连接重试仍分布于服务和 ActiveX 层，确实增加了独立测试难度。
+MainWindowViewModel、MainWindow、ChildSessionService、环境检查和 AutoLoginService 仍承担较多职责。具体视窗依赖已被端口替换，但会话服务仍直接调用 WTS，使用 Dispatcher/真实时间，连接重试仍分布于服务和 ActiveX 层。
 
-后续应围绕连接生命周期抽出可替换的 RDP 端口与状态机，把窗口组装留在应用入口，再按身份查询、凭据存储和 UI Automation 拆开自动登录。每次拆分先覆盖状态转换与资源所有权；本次没有在缺少真实连接回归环境时整体替换这些流程。
+后续应继续抽出连接状态机与平台端口，再按身份查询、凭据存储和 UI Automation 拆开自动登录。每次拆分先覆盖状态转换与资源所有权。
+
+## 已修复项目的发布阻断规则
+
+`build/release-gates.json` 登记每个修复的必需测试。CI 不仅要求测试通过，还要求指定名称的测试确实存在且执行；删掉、跳过或改名而未更新契约均会阻断发布。`verify-release-gates.ps1` 在打包前验证 TRX；独立 `release-gate` 检查要求整套 build 成功，发行作业同时依赖 build 和 release-gate。
+
+| 规则 | 必须保持的行为 |
+| --- | --- |
+| ARCH001 | 所有服务不得引用具体视窗；会话端口和视窗所有者不得引用 UI 或 Interop |
+| LIFE001 | 延迟创建且只持有一个视窗；配置失败关闭部分创建对象；关闭前解除订阅并保留清理错误 |
 
 全应用初次行覆盖率约 26%，主要缺口为 WPF UI、外部 COM、真实 Child Session 和系统修复路径。CI 通过不能证明游戏输入、图形性能或注销行为正常。原生冒烟探针只参与编译，需在支持的 Windows 客户端另行运行。启动集成测试创建并清理自己带唯一标识的程序和临时任务，不连接或注销真实子会话。
 
@@ -48,6 +57,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-invariants.ps1
 dotnet test tests/DesktopTwin.Tests/DesktopTwin.Tests.csproj -c Release --no-build --no-restore --collect:"XPlat Code Coverage" --results-directory artifacts/test-results --logger "trx;LogFileName=tests.trx"
 pwsh -NoProfile -File build/test-quality-gates.ps1
 pwsh -NoProfile -File build/verify-test-results.ps1 -ResultsDirectory artifacts/test-results
+pwsh -NoProfile -File build/verify-release-gates.ps1 -ResultsDirectory artifacts/test-results
 ```
 
 使用空或新的覆盖率输出目录；校验器拒绝混杂的不同报告。失败时查看 Actions 的 `quality-reports` 附件。升级依赖后先普通还原以更新锁文件，再执行上述检查与工作流中的两种发布命令。

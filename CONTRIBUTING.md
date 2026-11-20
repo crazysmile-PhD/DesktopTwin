@@ -26,7 +26,9 @@ dotnet run --project tests/DesktopTwin.NativeSmoke/DesktopTwin.NativeSmoke.cspro
 
 ## 合并与发布
 
-`main` 要求通过 PR 合并、通过 `build` 检查、保持分支与目标分支同步并解决审查对话；禁止强制推送和删除，管理员也遵守规则。不要求额外审批人数，仓库维护者可合并通过检查的 PR。
+`main` 要求通过 PR 合并、通过 `build` 与 `release-gate` 检查、保持分支与目标分支同步并解决审查对话；禁止强制推送和删除，管理员也遵守规则。不要求额外审批人数，仓库维护者可合并通过检查的 PR。
+
+每修复一项架构问题，在 `build/release-gates.json` 登记对应的必需测试；删除、跳过或缺少这些测试都会阻断打包和发行。规则不得通过新增豁免绕过；确需修改契约时在 PR 中说明行为变化与替代证据。
 
 发布前在 PR 中更新 `DesktopTwin.csproj` 的 `Version`、CHANGELOG 与 `build/release-notes/v<版本>.md`。合并并确认检查通过后，将对应的 `v<版本>` 标签推送到该合并提交。标签工作流会核对版本，构建、测试并生成两个 Windows x64 程序和包含各自 SHA-256 的 README；附件上传完成后公开 Release。不要重建或覆盖历史发行附件，历史迁移保留原文件并注明来源。
 

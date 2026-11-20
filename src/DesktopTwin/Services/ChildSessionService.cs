@@ -7,12 +7,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
 using System.Windows.Threading;
 using DesktopTwin.Interop;
 using DesktopTwin.Models;
-using DesktopTwin.View;
-using DrawingRectangle = System.Drawing.Rectangle;
+using DesktopTwin.Contracts;
 using DrawingSize = System.Drawing.Size;
 using DesktopTwin.Localization;
 
@@ -21,9 +19,7 @@ namespace DesktopTwin.Services;
 /// <summary>
 /// 桌面分身的编排层：负责会话生命周期、RDP 连接状态、失败重试与界面状态文本。
 ///
-/// 分层说明：本类直接持有 <see cref="MainWindow"/> 的引用。这是一个单窗口应用，
-/// 为「一个窗口 + 一个会话」的强绑定关系引入额外抽象只会增加阅读成本，
-/// 因此这里选择务实做法：服务负责状态与流程，窗口只负责显示。
+/// 视窗由应用入口注入；会话编排仅通过 UI 无关的端口操作它。
 /// </summary>
 public sealed class ChildSessionService : IDisposable
 {
@@ -127,7 +123,7 @@ public sealed class ChildSessionService : IDisposable
     /// </summary>
     private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
 
-    private MainWindow? _desktopWindow;
+    private readonly DesktopSessionHost _desktopHost;
     private bool _autoLaunchPending;
     private TaskCompletionSource<bool>? _connectionAttemptCompletionSource;
     private ChildSessionConnectionFailedEventArgs? _lastConnectionFailure;
@@ -210,11 +206,6 @@ public sealed class ChildSessionService : IDisposable
     public event EventHandler? DesktopSizeChanged;
 
     /// <summary>
-    /// 分身窗口实例。窗口在首次显示或首次连接时创建，未创建时为 null。
-    /// </summary>
-    public MainWindow? Window => _desktopWindow;
-
-    /// <summary>
     /// 自动登录服务。未注入时为 null。
     ///
     /// 界面要读写「已保存的密码」，而凭据的实际使用发生在本服务内部，
@@ -230,7 +221,7 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 分身窗口当前是否可见。
     /// </summary>
-    public bool IsDesktopVisible => _desktopWindow?.IsVisible == true;
+    public bool IsDesktopVisible => _desktopHost.Current?.IsVisible == true;
 
     /// <summary>
     /// RDP ActiveX 的连接状态：0 未连接、1 已连接、2 正在连接。
@@ -272,11 +263,11 @@ public sealed class ChildSessionService : IDisposable
 
     /// <summary>最近一次连接的鼠标设置是否被控件接受，不代表游戏输入已验证。</summary>
     public bool RelativeMouseModeSettingsAccepted =>
-        _desktopWindow?.RdpHost.RelativeMouseModeSettingsAccepted == true;
+        _desktopHost.Current?.RdpHost.RelativeMouseModeSettingsAccepted == true;
 
     /// <summary>最近一次连接配置时请求的鼠标模式，不含尚未应用的排队设置。</summary>
     internal bool RelativeMouseModeConfiguredEnabled =>
-        _desktopWindow?.RdpHost.RelativeMouseModeConfiguredEnabled == true;
+        _desktopHost.Current?.RdpHost.RelativeMouseModeConfiguredEnabled == true;
 
     /// <summary>
     /// 是否处于观看模式。
@@ -353,23 +344,16 @@ public sealed class ChildSessionService : IDisposable
     public string EnvironmentIssueSummary =>
         ChildSessionEnvironmentCheck.BuildSummary(_environmentIssues);
 
-    /// <summary>
-    /// 创建服务。构造时立即刷新一次状态，界面随后可以安全读取。
-    /// </summary>
-    public ChildSessionService(SettingsService settings)
-        : this(settings, autoLogin: null)
-    {
-    }
-
-    /// <summary>
-    /// 创建服务并注入自动登录。
-    /// </summary>
-    /// <param name="settings">设置来源。</param>
-    /// <param name="autoLogin">自动登录服务；为空表示不启用自动登录。</param>
-    internal ChildSessionService(SettingsService settings, AutoLoginService? autoLogin)
+    /// <summary>创建编排服务，窗口工厂由应用入口提供。</summary>
+    internal ChildSessionService(SettingsService settings,
+        Func<ChildSessionService, IDesktopSessionView> createView, AutoLoginService? autoLogin = null)
     {
         _settings = settings;
         _autoLogin = autoLogin;
+        _desktopHost = new DesktopSessionHost(() => createView(this), settings.Current.Session, ProvideAutoLoginCredential);
+        _desktopHost.VisibilityChanged += OnDesktopWindowVisibilityChanged;
+        _desktopHost.ConnectionFailed += OnRdpConnectionFailed;
+        _desktopHost.LoginCompleted += OnRdpLoginCompleted;
         SendSystemShortcutsToRemote = settings.Current.Session.SendSystemShortcutsToRemote;
         _statusTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -659,7 +643,7 @@ public sealed class ChildSessionService : IDisposable
     {
         ThrowIfDisposed();
         _windowHiddenByUser = true;
-        _desktopWindow?.Hide();
+        _desktopHost.Current?.Hide();
         RefreshState(Locale.Get("Svc.Status.Hidden"));
     }
 
@@ -810,7 +794,7 @@ public sealed class ChildSessionService : IDisposable
         _settings.SaveSoon();
         // 切回控制模式时 SetInputBlocked 会把焦点还给输入窗口：观看模式期间
         // 被系统移走的焦点不会自动回来，画面看着像还在观看模式。
-        _desktopWindow?.RdpHost.SetInputBlocked(enabled);
+        _desktopHost.Current?.RdpHost.SetInputBlocked(enabled);
         RefreshState(enabled
             ? Locale.Get("Svc.Status.WatchModeOn")
             : Locale.Get("Svc.Status.WatchModeOff"));
@@ -960,7 +944,7 @@ public sealed class ChildSessionService : IDisposable
                 _disposeCancellationTokenSource.Token);
             await operation.Completion;
             var terminatedSessionId = await operation.Request;
-            _desktopWindow?.Hide();
+            _desktopHost.Current?.Hide();
             RefreshState(terminatedSessionId is null
                 ? Locale.Get("Svc.Status.NoSessionHidden")
                 : Locale.Format("Svc.Status.SessionLoggedOff", terminatedSessionId.Value));
@@ -1001,7 +985,7 @@ public sealed class ChildSessionService : IDisposable
         {
             var enabled = ChildSessionNativeMethods.IsChildSessionsEnabled();
             ChildSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
-            ConnectedState = _desktopWindow?.RdpHost.ConnectedState ?? 0;
+            ConnectedState = _desktopHost.Current?.RdpHost.ConnectedState ?? 0;
 
             var connectionText = ConnectedState switch
             {
@@ -1216,11 +1200,11 @@ public sealed class ChildSessionService : IDisposable
         _pendingRdpSettingChanges = RdpSettingChange.None;
         _rdpSettingsReconnectRetriesRemaining = 0;
 
-        if (_desktopWindow is not null)
+        if (_desktopHost.Current is not null)
         {
-            _desktopWindow.IsVisibleChanged -= OnDesktopWindowVisibilityChanged;
-            _desktopWindow.RdpHost.ConnectionFailed -= OnRdpConnectionFailed;
-            _desktopWindow.RdpHost.LoginCompleted -= OnRdpLoginCompleted;
+            _desktopHost.VisibilityChanged -= OnDesktopWindowVisibilityChanged;
+            _desktopHost.ConnectionFailed -= OnRdpConnectionFailed;
+            _desktopHost.LoginCompleted -= OnRdpLoginCompleted;
             TryDisconnectRdpHost();
         }
 
@@ -1241,12 +1225,7 @@ public sealed class ChildSessionService : IDisposable
             AppLog.Warn("退出时注销分身会话失败。", exception);
         }
 
-        if (_desktopWindow is not null)
-        {
-            _desktopWindow.AllowClose = true;
-            _desktopWindow.Close();
-            _desktopWindow = null;
-        }
+        _desktopHost.Dispose();
 
         // 在途 COM 启动可能仍会释放此信号量；不用 Dispose 制造退出竞态。
         _sessionCancellation.Cancel();
@@ -1288,24 +1267,7 @@ public sealed class ChildSessionService : IDisposable
         RefreshState(operationMessage);
     }
 
-    private MainWindow EnsureDesktopWindow()
-    {
-        if (_desktopWindow is not null)
-        {
-            return _desktopWindow;
-        }
-
-        _desktopWindow = new MainWindow(this, _settings);
-        _desktopWindow.IsVisibleChanged += OnDesktopWindowVisibilityChanged;
-        _desktopWindow.RdpHost.ConnectionFailed += OnRdpConnectionFailed;
-        _desktopWindow.RdpHost.LoginCompleted += OnRdpLoginCompleted;
-        _desktopWindow.RdpHost.SetCredentialProvider(ProvideAutoLoginCredential);
-        _desktopWindow.RdpHost.SetSmartSizing(_settings.Current.Session.SmartSizing);
-        _desktopWindow.RdpHost.SetSendSystemShortcutsToRemote(SendSystemShortcutsToRemote);
-        _desktopWindow.RdpHost.SetAudioMuted(AudioMuted);
-        _desktopWindow.RdpHost.SetRelativeMouseMode(RelativeMouseModeEnabled);
-        return _desktopWindow;
-    }
+    private IDesktopSessionView EnsureDesktopWindow() => _desktopHost.GetOrCreate();
 
     /// <summary>
     /// 给 RDP 客户端提供自动登录凭据。关闭开关或没存密码时返回 null，退回交互式输入。
@@ -1322,20 +1284,7 @@ public sealed class ChildSessionService : IDisposable
             : null;
     }
 
-    private static void ShowDesktopWindow(Window window)
-    {
-        if (!window.IsVisible)
-        {
-            window.Show();
-        }
-
-        if (window.WindowState == WindowState.Minimized)
-        {
-            window.WindowState = WindowState.Normal;
-        }
-
-        window.Activate();
-    }
+    private static void ShowDesktopWindow(IDesktopSessionView window) => window.ShowAndActivate();
 
     /// <summary>
     /// 是否正处在连接流程里（RDP 正在连接，或有一次连接尝试在途）。
@@ -1358,7 +1307,7 @@ public sealed class ChildSessionService : IDisposable
         _rdpSettingsReconnectActive = false;
         _rdpSettingsReconnectRetriesRemaining = 0;
         _settingsReconnectGeneration++;
-        _desktopWindow?.RdpHost.CancelPendingReconnect();
+        _desktopHost.Current?.RdpHost.CancelPendingReconnect();
         // 待应用设置留给下一次显式连接，超时本身不继续消耗重试或认证次数。
         return true;
     }
@@ -1507,7 +1456,7 @@ public sealed class ChildSessionService : IDisposable
         }
     }
 
-    private void OnDesktopWindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    private void OnDesktopWindowVisibilityChanged(object? sender, EventArgs e)
     {
         RefreshState();
     }
@@ -1567,7 +1516,7 @@ public sealed class ChildSessionService : IDisposable
         _autoLogin?.StopWatching();
 
         // 输入窗口每次连接都会新建，观看模式需要重新施加到新窗口上。
-        _desktopWindow?.RdpHost.SetInputBlocked(WatchModeEnabled);
+        _desktopHost.Current?.RdpHost.SetInputBlocked(WatchModeEnabled);
 
         var completedSettingChanges = _pendingRdpSettingChanges;
         _rdpSettingsReconnectActive = false;
@@ -1775,7 +1724,7 @@ public sealed class ChildSessionService : IDisposable
             }
 
             RefreshState();
-            if (_desktopWindow is null)
+            if (_desktopHost.Current is null)
             {
                 return;
             }
@@ -1787,7 +1736,7 @@ public sealed class ChildSessionService : IDisposable
             MarkAttemptStarted();
             // OnLogonError 触发后 ActiveX 可能仍处于连接状态，必须先断开再重连。
             // 否则这里直接退出会丢失已捕获的真实错误，最终只剩外层连接超时。
-            _desktopWindow.RdpHost.ReconnectToChildSession(DesktopSize);
+            _desktopHost.Current.RdpHost.ReconnectToChildSession(DesktopSize);
         }
         catch (OperationCanceledException)
         {
@@ -1881,7 +1830,7 @@ public sealed class ChildSessionService : IDisposable
         var timeoutMessage =
             Locale.Format("Svc.Error.Timeout", ConnectionTimeout.TotalSeconds);
         var lastDiagnostic =
-            _desktopWindow?.RdpHost.LastConnectionDiagnostic
+            _desktopHost.Current?.RdpHost.LastConnectionDiagnostic
             ?? _lastConnectionFailure;
         if (lastDiagnostic is null)
         {
@@ -1927,7 +1876,7 @@ public sealed class ChildSessionService : IDisposable
     {
         try
         {
-            _desktopWindow?.RdpHost.DisconnectSession();
+            _desktopHost.Current?.RdpHost.DisconnectSession();
         }
         catch (Exception exception) when (exception is COMException or TargetInvocationException)
         {
@@ -1955,7 +1904,7 @@ public sealed class ChildSessionService : IDisposable
     }
 
     private bool ReconnectForRdpSettingChange(
-        MainWindow window,
+        IDesktopSessionView window,
         RdpSettingChange settingChange,
         string operationMessage)
     {

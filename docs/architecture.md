@@ -7,6 +7,9 @@
 | 组件 | 职责 |
 | --- | --- |
 | `MainWindow` / `MainWindowViewModel` | 显示、命令、用户提示和服务组装 |
+| `WpfDesktopSessionView` / `RdpSessionClient` | 将具体窗口与原生控件适配到 UI 无关的会话端口 |
+| `DesktopSessionHost` | 延迟创建一个视窗，配置初值、转发事件并负责关闭前解除订阅 |
+| `TrayIconController` | 托盘菜单与具体窗口的呈现交互，属于 View 层 |
 | `ChildSessionService` | 子会话连接、注销、设置重连、状态发布 |
 | `RdpActiveXHost` | MsRdpClient10 COM 配置、回调和控件层排队重连 |
 | `ChildSessionProcessLauncher` / `SessionLaunchWorker` | 临时任务只引导独立启动代理进入指定会话；清理后授权启动并核对回执 |
@@ -15,9 +18,9 @@
 | `AppSettingsNormalizer` | 无 IO 的设置修复与版本迁移；SettingsService 负责存储和延迟写入 |
 | `DiagnosticIssueHistory` | 独立维护诊断历史与已解决证据；DiagnosticsWindow 负责渲染 |
 
-会话服务直接持有窗口；这不是严格单向依赖架构。它同时保留服务层和控件层重试，仍有继续收敛的空间。
+App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 `IDesktopSessionView`、`IRdpSessionClient`，不创建或引用具体窗口和 ActiveX 控件。视窗配置失败会关闭部分创建的视窗，重试时重新创建；关闭前先解除事件订阅。
 
-架构测试阻止新增服务依赖具体窗口，并保持 Models 与诊断历史不依赖 UI/原生操作。ViewModel 通过幂等 `Dispose` 释放资源；WPF 窗口在关闭时调用。度量门槛和剩余拆分方向见 [质量门禁](quality-gates.md)。
+架构测试禁止任何服务依赖具体窗口，没有豁免名单；契约和 DesktopSessionHost 也不能依赖 WPF 或 Interop。服务层仍使用 UI Dispatcher 调度和 WTS 平台接口，连接重试也仍分布在服务和控件两层。ViewModel 通过幂等 `Dispose` 释放资源；WPF 窗口在关闭时调用。发布门禁和后续拆分见 [质量门禁](quality-gates.md)。
 
 ## 连接
 
