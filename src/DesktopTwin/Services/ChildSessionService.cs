@@ -168,7 +168,7 @@ public sealed class ChildSessionService : IDisposable
     private System.Collections.Generic.IReadOnlyList<ChildSessionEnvironmentCheck.Issue> _environmentIssues = [];
 
     /// <summary>
-    /// 启动代际。注销与释放会让它自增，正在跑的启动据此判断自己是否已经被取代。
+    /// 启动代际。主动断开、注销与释放使它自增，旧启动据此判断是否已被取代。
     /// 预检被移到后台后，启动流程中间多了一个等待点，等待期间用户完全可能点了注销。
     /// </summary>
     private int _startGeneration;
@@ -406,7 +406,7 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 当前启动代际。注销或释放会推进它，调用方可在等待前记下、启动时回传。
+    /// 当前启动代际。主动断开、注销或释放会推进它，调用方在等待前捕获并回传。
     /// </summary>
     public int StartGeneration
     {
@@ -1179,15 +1179,12 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 收集 Windows 环境结论，供界面在启动前提示用户，也供失败诊断使用。
-    /// </summary>
-    /// <summary>
     /// 采集并发布一次环境预检。
     ///
     /// 返回的 Task 在结果**真正发布之后**才完成：调用方紧接着就要读
     /// <see cref="HasBlockingEnvironmentIssue"/> 做启动决策，发布若只是排进队列
     /// （BeginInvoke 立刻返回），读到的还是上一次的结论，可能漏掉新的阻塞项。
-    /// 采集本身很慢，所以仍由调用方放在后台线程（视图模型用 Task.Run 调进来）。
+    /// 采集由服务放到后台，调用方直接 await；发布仍切回 UI Dispatcher。
     /// </summary>
     public async Task RefreshEnvironmentCheckAsync()
     {

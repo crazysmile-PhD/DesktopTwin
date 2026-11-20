@@ -28,8 +28,8 @@ namespace DesktopTwin.Services;
 ///    「不在线」而补拉新代理，新代理再杀旧代理——自噬循环，热键永远不稳。
 /// 3) 没有脚本文件、执行策略、缓存文件争用这些坑。
 ///
-/// 通信方式照搬社区脚本验证过的做法：分身端命中热键后写一个带时间戳的
-/// <c>request.json</c>，主端轮询它。文件通信不需要任何 IPC 权限。
+/// 分身端命中热键后立即写请求文件，主端通过文件事件接收，低频轮询兜底。
+/// 两端共用当前用户数据目录，文件访问仍受 Windows 权限控制。
 /// </summary>
 internal sealed class SessionAgentService : IDisposable
 {

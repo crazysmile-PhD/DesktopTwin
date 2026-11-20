@@ -1,6 +1,6 @@
 ﻿# Desktop Twin · UI language file (English)
 #
-# 595 entries · for Desktop Twin 0.2.9 · see Localization/README.md
+# Historical filename; maintained sample, missing keys fall back to built-in text. See Localization/README.md.
 #
 # How to use: rename this file to DesktopTwin.lng and put it next to
 # DesktopTwin.exe (same base name as the executable). There is no language
@@ -27,7 +27,7 @@ Startup.Connect=Start and connect
 Startup.CopyDiagnostics=Copy environment info
 Startup.Closing=Please wait. The window hides itself once closing finishes.
 Startup.Hint.Switch=Once connected, this area switches to the twin desktop automatically.
-Startup.Hint.FirstLogin=The first connection shows the Windows sign-in screen. Sign in with your current account; if your local account has no password, set one first.
+Startup.Hint.FirstLogin=If Windows requests credentials, check the account and sign-in method shown. The twin desktop appears after connection completes.
 Startup.Hint.Close=Closing the window signs out of the twin session and closes every program running in it.
 Menu.Start=Start
 Menu.Hide=Hide
@@ -37,7 +37,7 @@ Menu.LaunchTarget=Launch in the twin now
 Menu.TargetProgram=Target program: {0}
 Menu.AutoLaunch=Launch automatically after connecting
 Menu.RunAsAdmin=Run the target program as administrator
-Menu.RunAsAdmin.ToolTip=Off by default: running with normal privileges avoids conflicts with anti-cheat systems. Turn it on only when the target program itself needs elevation.
+Menu.RunAsAdmin.ToolTip=Use ordinary privileges by default. Enable only when the target program requires administrator privileges.
 Menu.Resolution=Desktop resolution
 Menu.Resolution.Custom=Custom…
 Menu.Resolution.Custom.ToolTip=Enter any width and height. The current resolution is shown in the status bar.
@@ -56,7 +56,7 @@ Menu.UuSwitch.ToolTip=When enabled, a global hotkey switches between "UU control
 Menu.UuHotkey=Switch hotkey: {0}
 Menu.UuTrigger=Switch once now
 Menu.UuRepair=Repair UU streaming (restart the UU service)
-Menu.UuRepair.ToolTip=After several quick switches the phone may report the device as offline: switching ends the streamer, and ending it repeatedly within a short time makes the UU service treat it as repeated crashes and stop restarting it. Click here to restart the UU service, then reconnect from the phone.
+Menu.UuRepair.ToolTip=Restart the UU streaming service manually, then reconnect from the phone and confirm the target. No endless background recovery is scheduled.
 Menu.AutoLogin.Enabled=Auto sign-in for the twin (enabled)
 Menu.AutoLogin.Disabled=Auto sign-in for the twin
 Menu.TargetProgram.None=Not selected
@@ -139,21 +139,17 @@ Uu.Switching.Title=Switching view
 Uu.Switching.Message=Moving the session target, please wait…
 Uu.Done.Title=View switched
 Uu.Failed.Title=View switch failed
-Uu.Recovered.Title=UU streaming is back
-Uu.Recovered.Message=The streamer is running again. Reconnect from the phone to get the desktop.
 Uu.Repair.Title=Repairing UU streaming
 Uu.Repair.Message=Restarting the UU service…
 Uu.Repair.Done=UU streaming repaired
 Uu.Repair.Failed=Could not repair UU streaming
 Uu.Result.Busy=The previous switch has not finished yet, so this one was ignored.
-Uu.Result.RecoveryBusy=The previous streamer recovery is still finishing. Try switching again in a moment.
 Uu.Result.Cancelled=Switch cancelled.
 Uu.Result.Failed=Switch failed: {0}
 Uu.Result.DisconnectFailed=The twin session could not be disconnected. Please try again.
 Uu.Result.NotConnected=The twin is not connected. Click "Start and connect" in the window.
 Uu.Result.NoSession=The twin session does not exist. Click "Start and connect" in the window.
 Uu.Result.ToMain=Confirmed the UU streamer on the main desktop. The twin stays disconnected; its programs keep running.
-Uu.Result.ToMain.NotRestored=Switched to "the whole PC", but the twin could not be parked in the background; switching back will reconnect.
 Uu.Result.ToMain.NoStreamer=The twin is disconnected. No UU streamer is running; connect UU and confirm the target desktop.
 Uu.Result.ToMain.StreamerStuck=The UU streamer was not confirmed on the main desktop within 15 seconds. Reconnect UU or run Repair UU streaming manually.
 Uu.Result.ToChild=Switched back to the twin desktop. Reconnect UU and you land on the game desktop.
@@ -162,7 +158,7 @@ Uu.Result.StreamerKillFailed=A UU streamer process is running but could not be t
 Uu.Result.StreamerKillFailed.NotRestored=A UU streamer process is running but could not be terminated, so the switch did not take effect and the child desktop could not be restored. End that process and reconnect.
 Uu.Result.ToChild.StreamerStuck=The UU streamer was not confirmed on the twin within 15 seconds. Reconnect UU or run Repair UU streaming manually.
 Uu.Result.ServiceRestarted=The UU service was restarted and the streamer is running again.
-Uu.Result.ServiceRestarted.NoStreamer=The UU service was restarted. Reconnect UU from the phone (the device should be online again).
+Uu.Result.ServiceRestarted.NoStreamer=The UU service is running, but no streamer was detected. Connect from the phone and check the device state.
 Uu.Result.ServiceRestartFailed=Could not restart the UU service (stop {0}, start failed). Please restart GameViewerService manually in Services.
 Diag.Title=Diagnose and fix
 Diag.StartupFailed.Title=Startup failed
@@ -212,20 +208,20 @@ Check.ReadFailed=Read failed
 Check.None=None
 Check.Yes=Yes
 Check.No=No
-Check.Credential.Title=Wrong password, or the Microsoft account credential has expired
-Check.Credential.Summary=The system rejected this sign-in but gave no specific reason
-Check.Credential.Detail=Windows only reports "the connection was dropped" without a reason: a wrong password and a stale cached Microsoft account credential look exactly the same, and the app cannot tell them apart.
+Check.Credential.Title=The connection may involve the account or credentials
+Check.Credential.Summary=The cause is unconfirmed; check the error codes and account state
+Check.Credential.Detail=The connection error may involve the account, credentials, or system state. This inference alone does not prove a wrong password or expired cloud credentials.\nSave and verify password uses the Windows logon API. Success does not guarantee RDP connectivity or cloud synchronization.
 
 The built-in auto sign-in saves you from typing it every time: store the password once and it is filled in automatically. When saving, the app performs a real interactive sign-in as an online check:
 - Verified: the password is correct and the local cache is refreshed.
 - "Wrong password": confirm it at account.microsoft.com first, then set it here again.
-Check.Credential.InactiveDetail=No credential rejection occurred in the last connection.
+Check.Credential.InactiveDetail=No credential-related runtime hint is currently shown.
 Check.Home.Title=This system is a Home edition
-Check.Home.Summary=Home edition has no Remote Desktop host, so the twin is "unsupported" here
-Check.Home.Detail=This system is {0} (Home edition). Microsoft's documentation states that Home edition does not include the Remote Desktop host, so Desktop Twin is in an "unsupported" state on it.\nIn practice most Home edition systems can still create a twin session, so this does not block anything. If startup never connects, consider upgrading.\n\nHow to switch to Pro (only changes the edition, **it does not activate Windows**; activation is up to you):\n1. Disconnect from the network;\n2. Open Settings, search for "Activation", click "Change product key";\n3. Enter the generic key VK7JG-NPHTM-C97JM-9MPGT-3V66T;\n4. Confirm and restart; after the restart the system is Pro.\n\nYou can also enter a product key you obtained elsewhere; the result is the same.
-Check.OldSystem.Title=Windows is too old
+Check.Home.Summary=Home edition detected; this project has no complete compatibility matrix for its configurations
+Check.Home.Detail=Detected {0} (Home edition). This is informational and does not block a connection attempt.\nAvailability depends on the Windows build, components, and policies. Preserve the actual error rather than assuming an edition upgrade is required.
+Check.OldSystem.Title=Child Session interface unavailable
 Check.OldSystem.Summary=This Windows has no Child Session API, so the twin cannot be created
-Check.OldSystem.Detail=This app relies on WTSEnableChildSessions from wtsapi32.dll, which exists since Windows 10 1803. The export is missing on this system, so Desktop Twin cannot be used.\nPlease upgrade to Windows 10 1803 or later.
+Check.OldSystem.Detail=A Child Session entry point could not be loaded, so creation cannot continue. Record the Windows build and full error, then check the system components and runtime environment.
 Check.TermDisabled.Title=TermService is disabled
 Check.TermDisabled.Summary=The Remote Desktop service is set to Disabled, so the twin cannot be created
 Check.TermDisabled.Detail=The Remote Desktop service (TermService) has the start type Disabled, so Windows never starts it and the twin cannot create a session.\nThe fix sets the start type back to Manual and starts the service. This does not make it start at boot; it only allows Windows to start it on demand, which is the default Windows behaviour.
@@ -234,11 +230,11 @@ Check.TermStopped.Summary=The Remote Desktop service is stopped
 Check.TermStopped.Detail=The Remote Desktop service (TermService) is not running, so the twin cannot create a session.\nThe fix simply starts the service.
 Check.RdpOff.Title=Remote Desktop host is turned off
 Check.RdpOff.Summary=fDenyTSConnections = 1, so this PC does not listen for RDP
-Check.RdpOff.Detail.Policy=fDenyTSConnections = 1 (set by group policy), so the RDP listener never starts and the twin cannot create a session.\n\nThis value comes from group policy; editing the local registry would be overwritten, so the app cannot fix it automatically.\nEnable "Allow users to connect remotely by using Remote Desktop Services" in gpedit.msc under Computer Configuration → Administrative Templates → Windows Components → Remote Desktop Services → Remote Desktop Session Host → Connections, or contact your domain administrator.
-Check.RdpOff.Detail.Local=fDenyTSConnections = 1 (local setting), so the RDP listener never starts and the twin cannot create a session.\n\nClick "Fix" on the right to set it back to 0 and restart the Remote Desktop service.\nNote: this allows other machines to connect to this PC over the network, so it loosens a security setting. Restarting the service also drops every current Remote Desktop session, including a running twin.
+Check.RdpOff.Detail.Policy=fDenyTSConnections = 1 was read from group policy, and the current preflight treats it as blocking. This value alone does not establish the complete cause of a Child Session failure.\nThe app does not automatically override organizational policy. Ask the administrator to verify the actual connection requirements.
+Check.RdpOff.Detail.Local=fDenyTSConnections = 1 was read from local settings, so the current preflight blocks startup.\nFix attempts to change it to 0 and restart Remote Desktop Services. This changes remote access settings and may disconnect current sessions. Confirm the scope first; this check alone does not prove the root cause.
 Check.HelloOnly.Title=Only Windows Hello sign-in is allowed
-Check.HelloOnly.Summary=The Microsoft account has no usable password credential on this PC
-Check.HelloOnly.Detail="For improved security, only allow Windows Hello sign-in for Microsoft accounts on this device" is enabled. A Microsoft account then has no usable password credential on this PC, so the twin keeps reporting invalid credentials no matter what password you enter.\n\nClick "Fix" on the right to turn that switch off, but **you must sign out or restart for it to take effect**; the credential provider is chosen at sign-in, so it does not refresh by itself.\nYou can also turn the same option off manually under Settings → Accounts → Sign-in options.
+Check.HelloOnly.Summary=A related sign-in setting was detected and the current preflight treats it as blocking
+Check.HelloOnly.Detail=A related Windows Hello-only setting is enabled. The current preflight treats it as blocking; this registry value alone does not prove every authentication method is unavailable.\nCheck the account and organizational policy before changing it. Repair changes this sign-in setting. App credential storage and Windows automatic sign-in are separate features.
 Check.Wrapper.Title=TermService is taken over by a third-party patch
 Check.Wrapper.Summary=ServiceDll points at {0}, which conflicts with the twin
 Check.Wrapper.Detail=The ServiceDll of TermService points at a non-stock DLL (currently: {0}). Tools such as RDP Wrapper and SuperRDP unlock concurrent multi-user Remote Desktop by replacing that value, while Desktop Twin uses the Child Session feature of the stock termsrv.dll. One value can only point at one DLL, so the two are mutually exclusive.\n\nThe fix does three things: back up and restore the stock termsrv.dll, disable the "RDP Wrapper Autoupdate" scheduled task (otherwise it writes the patch back at boot), then restart the Remote Desktop service.\nThe trade-off: concurrent multi-user Remote Desktop stops working and you would have to reinstall the patch tool to get it back.
@@ -368,7 +364,7 @@ Agent.EmbeddedMissing=The embedded twin agent (DesktopTwin.Agent.exe) is missing
 Dialog.SelectProgram.Title=Choose a program to run in the twin desktop
 Dialog.SelectProgram.Filter=Windows programs (*.exe)|*.exe
 Startup.FirstRun.Title=First-time notes
-Startup.FirstRun.Message=Before starting Desktop Twin, here is what it does:\n\n1. This app runs as administrator and turns on Windows Child Sessions.\n   That is a system-wide setting: it stays after you close the app and is not reverted by a restart.\n2. You can undo it at any time under Control Center → Diagnostics → Turn off Child Sessions (restore the system).\n3. Desktop Twin creates a second desktop for the same account. It is not a sandbox:\n   files and permissions reachable in the twin are exactly the same as on the main desktop.\n\nContinue?
+Startup.FirstRun.Message=Before starting the twin:\n\n1. This app runs as administrator and enables Windows Child Sessions. It does not disable that system feature on exit.\n2. You can request disabling it from Control > Diagnostics > Disable Child Sessions.\n3. The twin is another desktop associated with this account, uses local resources, and shares accessible files. It is not a sandbox. Program privileges depend on the launch settings.\n\nContinue?
 Startup.IssueConfirm.Suffix=\n\nEnvironment settings that can affect Desktop Twin were detected. Continue anyway?
 Startup.IssueConfirm.Title=Desktop Twin environment check
 Startup.Blocked.Title=Cannot start Desktop Twin
@@ -494,8 +490,8 @@ Diag.ShowAll.Hint=All-checks view: every check is listed, including the ones tha
 Diag.Empty.Inactive=Every check is currently triggered.
 Diag.Status.SummaryAll=All checks: {0} triggered, {1} not triggered.
 Check.Inactive.Summary=Not triggered · {0}
-Check.Home.InactiveDetail=Check: whether the system is a Home edition. Home edition officially has no Remote Desktop host, though most systems can still create a twin session, so this is a notice only and never blocks startup.\nCurrent edition: {0}
-Check.OldSystem.InactiveDetail=Check: whether wtsapi32.dll exports WTSEnableChildSessions (present since Windows 10 1803). This system has it, so nothing is reported.\nCurrent system: {0}
+Check.Home.InactiveDetail=Check: Home edition detection is informational and does not validate complete compatibility.\nCurrent edition: {0}
+Check.OldSystem.InactiveDetail=Check: whether the Child Session status interface can be called. Success does not validate every connection dependency.\nCurrent system: {0}
 Check.TermDisabled.InactiveDetail=Check: whether the Remote Desktop service (TermService) start type is Disabled.\nCurrent start type: {0}
 Check.TermStopped.InactiveDetail=Check: whether the Remote Desktop service (TermService) is running.\nCurrent state: {0}
 Check.RdpOff.InactiveDetail=Check: whether fDenyTSConnections is 1 (group policy overrides the local setting). At 1 this PC does not listen for RDP and the twin cannot be created.\nCurrent value: {0}
@@ -614,3 +610,9 @@ Diag.FixHint.ServiceKey=This restores ImagePath and ObjectName to the Windows de
 Diag.FixHint.Persistence=This exports the matched scheduled tasks as XML and the autostart entries as text into the backup folder, then deletes them. Once they are gone these tools can no longer switch the configuration back to the patched state at boot.
 Diag.FixHint.RdpSecurity=This only raises values that are below the Windows default; anything already hardened to a higher value stays as it is. Changes take effect when the Remote Desktop service next starts; the service is not restarted.
 Diag.FixHint.Termsrv=This first restores termsrv.dll from a backup the tool left behind (the copy is re-verified with sfc immediately and rolled back if it does not pass); if no usable backup exists, it stops the Remote Desktop service and repairs that single file in place with sfc /scanfile (seconds to a minute, effective immediately with no reboot). Only if that fails does it start a full sfc /scannow in a new window (usually 5-15 minutes; the window keeps the result on screen).
+
+Menu.UuViewLock.ToolTip=Check the recorded target after session or UU streamer changes. Manual switching takes priority. Stop and notify after three unstable corrections. Lock-only mode targets the host and does not install the twin agent.
+
+Notify.UuLockFailed.Title=UU view lock stopped
+
+Notify.UuLockFailed.Message=Monitoring failed, or the target remained unstable after three corrections. Check the logs and verify manual switching before enabling the lock again.

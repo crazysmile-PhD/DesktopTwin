@@ -1,44 +1,32 @@
-﻿桌面分身 DesktopTwin v{{VERSION}}
+DesktopTwin v{{VERSION}}
 ========================================
 
-这里有两个版本，功能完全一样，选一个用就行。
-
 DesktopTwin-{{VERSION}}.exe
-  自带 .NET 运行时，双击就能跑，不需要装任何东西。
-  体积大（约 70 MB），第一次启动会稍微慢一点。
-  >>> 不确定选哪个就选这个。
+  自带 .NET 运行时；仍依赖 Windows 的 RDP ActiveX、子会话能力及系统组件。
 
 DesktopTwin-{{VERSION}}-NET10.exe
-  体积小（约 7 MB），但需要先安装 .NET 10 桌面运行时，否则会提示缺少运行时。
-  下载地址：https://dotnet.microsoft.com/download/dotnet/10.0
-  选「.NET Desktop Runtime」，不是「ASP.NET Core Runtime」。
-  适合已经装了 .NET 10 的机器，或者想省磁盘空间的场景。
+  需要 .NET 10 Desktop Runtime：
+  https://dotnet.microsoft.com/download/dotnet/10.0
 
-----------------------------------------
-注意事项（两个版本相同）
-----------------------------------------
+两种包使用同一套功能，程序清单都要求管理员权限。
+首次连接前会说明启用系统 Child Sessions 功能。
+关闭并确认或退出会注销分身，结束里面的程序，请先保存。
 
-  * 必须以管理员权限运行（程序清单要求，会弹 UAC）
-  * 放到固定目录再用，不要留在下载文件夹里
-  * 首次启动会提示「会修改系统级 Child Sessions 开关」，确认后才会启动
-  * 文件名可以随便改，放在带中文或空格的路径下也不影响运行
+画面仍经过子会话和显示路径，不保证零延迟、固定帧率或固定内存占用。
+UU 切主机后分身保持断开；超时会报告未确认，不再无限恢复服务。
 
-首次使用建议先看「控制中心 → 诊断 → 诊断与修复…」，
-它会列出当前环境里可能影响启动的问题。
+当前使用与排查说明：
+https://github.com/crazysmile-PhD/DesktopTwin/blob/main/README.md
+https://github.com/crazysmile-PhD/DesktopTwin/blob/main/docs/troubleshooting.md
+这些链接指向 main，可能包含此发行版本尚未具备的变更，请同时核对版本记录。
 
-----------------------------------------
-校验值（SHA256）
-----------------------------------------
-
+SHA256
 DesktopTwin-{{VERSION}}.exe
   {{SHA256_STANDALONE}}
-
 DesktopTwin-{{VERSION}}-NET10.exe
   {{SHA256_FRAMEWORK}}
 
-校验方法：在文件所在目录打开 PowerShell，执行
-
+PowerShell 校验：
   Get-FileHash ".\DesktopTwin-{{VERSION}}.exe" -Algorithm SHA256
 
-把输出的 Hash 和上面那串逐字符比对。一致说明文件在下载过程中没被动过；
-不一致就别运行，重新下载一次。
+哈希一致只表示与这里的参考文件相同，不等于安全或签名认证。
