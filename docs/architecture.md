@@ -69,6 +69,8 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 
 ## 后台工作与状态
 
+显式传入 `--control-pipe` 时，`App` 持有本地测试桥接并在关闭时取消它。`Diagnostics.LocalControlBridge` 只负责当前用户 ACL、请求边界与协议；`View.DesktopControlTarget` 在 Dispatcher 上调用既有命令、读取状态和核对前台/输入焦点，`Interop.DiagnosticInput` 提供有限的原生输入。普通启动没有监听器。协议与实际验证边界见[本地交互测试桥接](local-control.md)。
+
 - 状态采样仍为 UI 上每 500ms 一次；只在发布快照变化时触发 `StateChanged`。
 - 诊断在打开、激活、手动重检和后台完整性校验完成时采集；采集在后台，界面只渲染快照。没有每两秒完整重扫。
 - 计划任务扫描保留 30 秒缓存；文件完整性校验在后台串行运行。读取失败和未验证结果不能作为正常证据。

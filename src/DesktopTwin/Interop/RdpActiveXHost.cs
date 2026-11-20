@@ -42,6 +42,8 @@ internal sealed class RdpActiveXHost : AxHost
     internal bool RelativeMouseModeConfiguredEnabled { get; private set; }
     /// <summary>控件最近报告的输入模式，尚未收到回调时为 null；与属性回读分开记录。</summary>
     internal bool? ReportedRelativeMouseMode { get; private set; }
+    internal bool? RelativeMouseModeAfterLogin { get; private set; }
+    internal bool LoginComplete => _displayReady;
 
     /// <summary>
     /// 待重连的代际号。取消（DisconnectSession / ResetDisconnectState）时自增，
@@ -117,6 +119,7 @@ internal sealed class RdpActiveXHost : AxHost
         _lastDisplayRequest = null;
         ReportedDesktopSize = null;
         ReportedRelativeMouseMode = null;
+        RelativeMouseModeAfterLogin = null;
         var width = Math.Clamp(desktopSize.Width, 200, 8192);
         var height = Math.Clamp(desktopSize.Height, 200, 8192);
 
@@ -578,6 +581,7 @@ internal sealed class RdpActiveXHost : AxHost
             var mode = RdpRelativeMouseOptions.ReapplyAfterLogin(RelativeMouseModeConfiguredEnabled,
                 enabled => SetComProperty(GetAdvancedSettings(), "RelativeMouseMode", enabled),
                 () => Convert.ToBoolean(GetComProperty(GetAdvancedSettings(), "RelativeMouseMode"), CultureInfo.InvariantCulture));
+            RelativeMouseModeAfterLogin = mode;
             AppLog.Info($"相对鼠标登录后：请求={RelativeMouseModeConfiguredEnabled}，模式读回={mode?.ToString() ?? "未知"}，"
                 + $"模式回调={ReportedRelativeMouseMode?.ToString() ?? "尚未收到"}。游戏转视角仍需实际验证。");
         }

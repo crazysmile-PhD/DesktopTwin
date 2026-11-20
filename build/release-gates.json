@@ -11,6 +11,15 @@
       "DesktopTwin.Tests.SettingsServiceTests.升级时恢复可读的自动分辨率且不再自动进入旧小窗"
     ]
   },
+  "CTRL001": {
+    "description": "Local diagnostics are opt-in, accept only bounded actions and recover from rejected clients.",
+    "tests": [
+      "DesktopTwin.Tests.LocalControlBridgeTests.BridgeIsOptInAndRequiresAnUnambiguousLocalPipeName",
+      "DesktopTwin.Tests.LocalControlBridgeTests.MovementDurationAndResizeRequestsAreBounded",
+      "DesktopTwin.Tests.LocalControlBridgeTests.MalformedClientDoesNotStopTheNextValidRequest",
+      "DesktopTwin.Tests.LocalControlBridgeTests.SlowReaderReceivesTheWholeReplyBeforeTheServerDisconnects"
+    ]
+  },
   "ARCH001": {
     "description": "No service may depend on concrete views; session ports and their owner stay independent of UI and native controls.",
     "tests": [

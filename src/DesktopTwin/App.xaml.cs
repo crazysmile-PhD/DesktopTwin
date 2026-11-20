@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using DesktopTwin.Localization;
+using DesktopTwin.Diagnostics;
 using DesktopTwin.Services;
 using DesktopTwin.View;
 using DesktopTwin.ViewModel;
@@ -34,6 +35,7 @@ public partial class App : Application
     private AutoLoginService? _autoLogin;
     private ChildSessionService? _childSessionService;
     private MainWindow? _mainWindow;
+    private LocalControlBridge? _controlBridge;
     private TrayIconController? _trayIcon;
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
@@ -141,11 +143,20 @@ public partial class App : Application
         using (new PerformanceTrace("主窗口构造与显示"))
             _childSessionService.ShowWindow();
         MainWindow = _mainWindow;
+        StartControlBridge(e.Args);
         if (_mainWindow is not null)
             _mainWindow.ContentRendered += OnFirstContentRendered;
 
         // 托盘图标常驻：窗口被隐藏后，这是唯一能把它叫回来的入口。
         _trayIcon = new TrayIconController(_childSessionService, () => _mainWindow);
+    }
+
+    private void StartControlBridge(string[] args)
+    {
+        var pipe = LocalControlBridge.ReadPipeArgument(args);
+        if (pipe is null || _mainWindow is null || _settings is null) return;
+        var target = new DesktopControlTarget(_mainWindow, _settings);
+        _controlBridge = new LocalControlBridge(pipe, target.HandleControlRequestAsync);
     }
 
     private void OnFirstContentRendered(object? sender, EventArgs e)
@@ -172,6 +183,8 @@ public partial class App : Application
         // 托盘先释放：它会订阅服务的状态事件，服务释放后回调会打到已失效的对象上。
         _trayIcon?.Dispose();
         _trayIcon = null;
+        _controlBridge?.Dispose();
+        _controlBridge = null;
 
         _childSessionService?.Dispose();
         _autoLogin?.Dispose();

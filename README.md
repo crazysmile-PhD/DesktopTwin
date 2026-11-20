@@ -89,6 +89,7 @@ dotnet publish src/DesktopTwin/DesktopTwin.csproj -c Release -r win-x64 --self-c
 
 - [排查手册](docs/troubleshooting.md)：连接、凭据、黑屏、升级与反馈信息。
 - [性能排查](docs/performance.md)：区分帧率、等待与资源占用。
+- [本地交互桥接](docs/local-control.md)：显式启用受限 API，在实际分身中验证缩放、焦点与游戏输入。
 - [架构](docs/architecture.md)：线程、操作边界和等待预算。
 - [参与开发](CONTRIBUTING.md)：构建、测试和人工验证范围。
 - [质量门禁](docs/quality-gates.md)：静态分析、架构依赖、覆盖率及剩余债务。
