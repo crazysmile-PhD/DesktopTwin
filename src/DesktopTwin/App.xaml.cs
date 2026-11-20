@@ -181,6 +181,9 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         using var timing = new PerformanceTrace("退出资源清理（OnExit）");
+        // Fallback for shutdown paths other than the window/tray's awaited close.
+        try { ChildSessionProcessLauncher.StopAsync().GetAwaiter().GetResult(); }
+        catch (Exception error) { AppLog.Error("退出时未能确认临时启动任务已全部清理。", error); }
         AppLog.Info("DesktopTwin 退出");
 
         // 托盘先释放：它会订阅服务的状态事件，服务释放后回调会打到已失效的对象上。

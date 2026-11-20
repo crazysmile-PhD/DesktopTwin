@@ -40,6 +40,7 @@
 	<ItemGroup>
 		<!-- 让测试能直接调用 internal 的安全守卫，而不必把它们提升成公共 API -->
 		<InternalsVisibleTo Include="DesktopTwin.Tests" />
+		<Compile Include="..\Shared\SessionLaunchProtocol.cs" Link="Launching\SessionLaunchProtocol.cs" />
 	</ItemGroup>
 
 	<!-- ===== 分身端代理 =====
@@ -54,6 +55,8 @@
 	<Target Name="BuildSessionAgent" BeforeTargets="PrepareForBuild">
 		<PropertyGroup>
 			<SessionAgentSource>$(MSBuildThisFileDirectory)..\SessionAgent\SessionAgentProgram.cs</SessionAgentSource>
+			<SessionLaunchWorkerSource>$(MSBuildThisFileDirectory)..\SessionAgent\SessionLaunchWorker.cs</SessionLaunchWorkerSource>
+			<SessionLaunchProtocolSource>$(MSBuildThisFileDirectory)..\Shared\SessionLaunchProtocol.cs</SessionLaunchProtocolSource>
 			<SessionAgentManifest>$(MSBuildThisFileDirectory)..\SessionAgent\app.manifest</SessionAgentManifest>
 			<SessionAgentIcon>$(MSBuildProjectDirectory)\Assets\DesktopTwin.ico</SessionAgentIcon>
 			<SessionAgentOutput>$(IntermediateOutputPath)DesktopTwin.Agent.exe</SessionAgentOutput>
@@ -64,7 +67,7 @@
 		<Error Condition="!Exists('$(SessionAgentCompiler)')"
 		       Text="找不到 .NET Framework 的编译器，无法构建分身端代理。" />
 		<MakeDir Directories="$(IntermediateOutputPath)" />
-		<Exec Command="&quot;$(SessionAgentCompiler)&quot; /nologo /target:winexe /optimize+ /win32manifest:&quot;$(SessionAgentManifest)&quot; /win32icon:&quot;$(SessionAgentIcon)&quot; /out:&quot;$(SessionAgentOutput)&quot; /reference:System.dll /reference:System.Core.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll &quot;$(SessionAgentSource)&quot;" />
+		<Exec Command="&quot;$(SessionAgentCompiler)&quot; /nologo /target:winexe /optimize+ /win32manifest:&quot;$(SessionAgentManifest)&quot; /win32icon:&quot;$(SessionAgentIcon)&quot; /out:&quot;$(SessionAgentOutput)&quot; /reference:System.dll /reference:System.Core.dll /reference:System.Windows.Forms.dll /reference:System.Drawing.dll &quot;$(SessionAgentSource)&quot; &quot;$(SessionLaunchWorkerSource)&quot; &quot;$(SessionLaunchProtocolSource)&quot;" />
 
 		<ItemGroup>
 			<EmbeddedResource Include="$(SessionAgentOutput)" LogicalName="DesktopTwin.Agent.exe" />
