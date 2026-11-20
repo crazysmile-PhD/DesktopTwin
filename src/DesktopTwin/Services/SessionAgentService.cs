@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -47,15 +47,6 @@ internal sealed class SessionAgentService : IDisposable
     private static readonly TimeSpan RequestMaxAge = TimeSpan.FromSeconds(12);
 
     /// <summary>
-    /// 「拉起分身端之后」的启动宽限期。
-    ///
-    /// 分身端冷启动要看进程创建和登录完成，给它一段宽限再判定「不在线」：
-    /// 判早了就会补拉新代理，而旧代理正在启动——两个进程互抢热键和互斥体，
-    /// 结果一个稳定的都没有。
-    /// </summary>
-    private static readonly TimeSpan LaunchGracePeriod = TimeSpan.FromSeconds(60);
-
-    /// <summary>
     /// 心跳超过这个年龄就当代理卡住了。代理每 2 秒写一次，容错 15 次。
     /// </summary>
     private static readonly TimeSpan HeartbeatFreshWindow = TimeSpan.FromSeconds(30);
@@ -81,7 +72,6 @@ internal sealed class SessionAgentService : IDisposable
     private FileSystemWatcher? _requestWatcher;
     private int _requestNotificationQueued;
     private DateTime _lastRequestSeen = DateTime.MinValue;
-    private long _lastLaunchTickCount = -1;
     private string _hotkeyArgument = "Ctrl+Alt+U";
 
     /// <summary>连续读心跳失败的次数；成功一次就清零。</summary>
@@ -207,7 +197,7 @@ internal sealed class SessionAgentService : IDisposable
     /// 用任务计划程序以「有限权限 + 交互令牌」启动：代理清单是 asInvoker，
     /// 不会弹 UAC。
     /// </summary>
-    /// <returns>是否已下发启动任务。</returns>
+    /// <returns>是否已确认代理热键与消息循环就绪。</returns>
     public async Task<bool> TryStartInChildSessionAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -253,9 +243,9 @@ internal sealed class SessionAgentService : IDisposable
         bool ok;
         try
         {
-            ok = await Task.Run(() => ChildSessionProcessLauncher.RunInSession(
+            ok = await ChildSessionProcessLauncher.RunInSessionAsync(
                 sessionId.Value, AgentPath, arguments,
-                taskNamePrefix: "DesktopTwin-SessionAgent-", cancellationToken: startToken));
+                taskNamePrefix: "DesktopTwin-SessionAgent-", cancellationToken: startToken);
         }
         catch (OperationCanceledException)
         {
@@ -276,8 +266,9 @@ internal sealed class SessionAgentService : IDisposable
         if (ok)
         {
             NeedsRestart = false;
-            // 进入启动宽限期：这段时间内即使没有心跳也按「在线」处理。
-            _lastLaunchTickCount = Environment.TickCount64;
+            // 启动结果已由目标会话中的热键注册及消息循环回执确认。
+            _lastAgentProbeTicks = -100_000;
+            _lastHeartbeatCheckTicks = -100_000;
         }
 
         return ok;
@@ -304,18 +295,6 @@ internal sealed class SessionAgentService : IDisposable
     /// </summary>
     public bool IsAgentOnline()
     {
-        // 启动宽限：刚拉起就等心跳会把还没完成启动的代理误判成「不在线」，
-        // 触发又一次拉起——新代理会杀掉正在启动的旧代理，形成自噬循环。
-        if (_lastLaunchTickCount >= 0)
-        {
-            var sinceLaunch = TimeSpan.FromMilliseconds(
-                unchecked(Environment.TickCount64 - _lastLaunchTickCount));
-            if (sinceLaunch >= TimeSpan.Zero && sinceLaunch < LaunchGracePeriod)
-            {
-                return true;
-            }
-        }
-
         if (!HasLiveAgentProcess())
         {
             return false;
@@ -380,7 +359,7 @@ internal sealed class SessionAgentService : IDisposable
     }
 
     /// <summary>
-    /// 只看心跳文件判断分身端是否还在写心跳（不含启动宽限）。
+    /// 只看心跳文件判断分身端是否还在写心跳。
     ///
     /// 读文件时会撞上代理正在写：两边都用 <see cref="FileShare.ReadWrite"/> 打开就不会互斥。
     /// 即便这样仍可能失败（杀软扫描等），因此**单次失败不算掉线**：
