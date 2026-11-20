@@ -88,8 +88,7 @@ public static class ChildSessionProcessLauncher
         var workingDirectory = Path.GetDirectoryName(fullPath) ?? AppContext.BaseDirectory;
         return TrackLaunch(token => LaunchWithTemporaryTaskAsync(
             childSessionId, fullPath, arguments ?? string.Empty, workingDirectory,
-            runAsAdministrator, TaskNamePrefix, token,
-            ChildSessionNativeMethods.TryGetChildSessionId), cancellationToken);
+            runAsAdministrator, TaskNamePrefix, ChildSessionNativeMethods.TryGetChildSessionId, token), cancellationToken);
     }
 
     private static Task TrackLaunch(Func<CancellationToken, Task> launch, CancellationToken token)
@@ -101,7 +100,7 @@ public static class ChildSessionProcessLauncher
             var task = Task.Run(async () =>
             {
                 using (linked) await launch(linked.Token).ConfigureAwait(false);
-            });
+            }, CancellationToken.None); // Enter the delegate even after cancellation to dispose and clean up.
             ActiveLaunches.Add(task);
             _ = task.ContinueWith(completed =>
             {
@@ -446,7 +445,7 @@ public static class ChildSessionProcessLauncher
 
     internal static async Task LaunchWithTemporaryTaskAsync(uint childSessionId, string executablePath,
         string arguments, string workingDirectory, bool runAsAdministrator,
-        string taskNamePrefix, CancellationToken cancellationToken, Func<uint?> getSessionId)
+        string taskNamePrefix, Func<uint?> getSessionId, CancellationToken cancellationToken)
     {
         void ValidateSession()
         {

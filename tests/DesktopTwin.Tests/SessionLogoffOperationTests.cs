@@ -31,7 +31,7 @@ public sealed class SessionLogoffOperationTests
     {
         var failure = new InvalidOperationException("request rejected");
         var operation = new SessionLogoffOperation(Task.FromException<uint?>(failure),
-            () => throw new Exception("must not query after rejected request"),
+            () => throw new InvalidOperationException("must not query after rejected request"),
             TimeSpan.FromSeconds(5), CancellationToken.None);
 
         Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => operation.Request));
@@ -42,7 +42,7 @@ public sealed class SessionLogoffOperationTests
     public async Task MissingSessionNeedsNoCompletionPolling()
     {
         var operation = new SessionLogoffOperation(Task.FromResult<uint?>(null),
-            () => throw new Exception("must not query without a session"),
+            () => throw new InvalidOperationException("must not query without a session"),
             TimeSpan.FromSeconds(5), CancellationToken.None);
         await operation.Completion.WaitAsync(TimeSpan.FromSeconds(2));
     }

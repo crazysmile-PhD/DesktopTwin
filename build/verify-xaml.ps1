@@ -4,9 +4,9 @@
 # 这个脚本在没有运行环境的情况下做一次静态核对：
 #   1. XAML 里所有 {Binding Xxx} 的路径，必须在 ViewModel 上有对应的公共属性；
 #   2. XAML 里所有 {StaticResource Xxx}，必须在 App.xaml 里定义（或来自 WPF-UI 的主题字典，脚本会忽略这些已知键）；
-#   3. XAML 里所有 Symbol="Xxx" 必须在 WPF-UI 的 SymbolRegular 枚举中存在（从程序集字符串表核对）。
+#   3. XAML 里所有 Symbol="Xxx" 必须在 WPF-UI 的 SymbolRegular 枚举中存在（从枚举成员精确核对）。
 #
-# 用法：pwsh build/verify-xaml.ps1
+# 用法：powershell -NoProfile -File build/verify-xaml.ps1
 
 [CmdletBinding()]
 param()
@@ -58,6 +58,18 @@ $knownThemeKeys = @(
     'DefaultTextBoxStyle'
 )
 
+# Load the exact enum once. Missing dependencies must fail, never silently skip validation.
+[xml]$project = Get-Content (Join-Path $repoRoot "src/DesktopTwin/DesktopTwin.csproj") -Raw
+$uiVersion = ($project.Project.ItemGroup.PackageReference | Where-Object { $_.Include -eq 'WPF-UI' }).Version
+$packagesRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget/packages' }
+$uiDll = Join-Path $packagesRoot "wpf-ui/$uiVersion/lib/net462/Wpf.Ui.dll"
+if (-not (Test-Path -LiteralPath $uiDll)) { throw "Missing WPF-UI assembly: $uiDll. Run dotnet restore first." }
+$uiAssembly = [Reflection.Assembly]::ReflectionOnlyLoadFrom($uiDll)
+$symbolNames = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+foreach ($name in $uiAssembly.GetType('Wpf.Ui.Controls.SymbolRegular', $true).GetEnumNames()) {
+    [void]$symbolNames.Add($name)
+}
+
 # ---------- 3. 逐个 XAML 校验 ----------
 $xamlFiles = Get-ChildItem $xamlDir -Filter *.xaml -Recurse
 foreach ($file in $xamlFiles) {
@@ -93,17 +105,8 @@ foreach ($file in $xamlFiles) {
     # 图标枚举
     foreach ($match in [regex]::Matches($text, 'Symbol="([A-Za-z0-9]+)"')) {
         $symbol = $match.Groups[1].Value
-        $uiDll = Join-Path $env:USERPROFILE ".nuget/packages/wpf-ui/4.2.0/lib/net462/Wpf.Ui.dll"
-        if (Test-Path $uiDll) {
-            if ($null -eq $script:uiDllText) {
-                # 把程序集按 Latin1 读成字符串，用 IndexOf 匹配元数据字符串表，比逐字节比较快几个数量级
-                $bytes = [System.IO.File]::ReadAllBytes($uiDll)
-                $script:uiDllText = [System.Text.Encoding]::GetEncoding(28591).GetString($bytes)
-            }
-
-            if ($script:uiDllText.IndexOf($symbol, [System.StringComparison]::Ordinal) -lt 0) {
-                $failures.Add("$relative：图标 $symbol 不在 SymbolRegular 枚举中")
-            }
+        if (-not $symbolNames.Contains($symbol)) {
+            $failures.Add("$relative：图标 $symbol 不在 SymbolRegular 枚举中")
         }
     }
 }

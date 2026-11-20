@@ -74,6 +74,7 @@ internal static class ChildSessionNativeMethods
         IntPtr parameter);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1838", Justification = "Bounded Unicode buffer matches the existing Win32 marshalling contract.")]
     private static extern int GetWindowText(
         IntPtr window,
         StringBuilder text,

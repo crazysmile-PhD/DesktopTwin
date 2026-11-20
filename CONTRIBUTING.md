@@ -2,9 +2,10 @@
 
 ## 构建与检查
 
-在 Windows 上安装 .NET SDK 10 或更新的兼容 SDK。项目使用 WPF、WinForms 和系统 RDP ActiveX；构建目标还会调用 Windows .NET Framework 的编译器生成独立代理。实际运行应用要求管理员权限，纯单元测试不因此获得操作真实会话的授权。
+在 Windows 上安装 `global.json` 指定的 .NET SDK。项目使用 WPF、WinForms 和系统 RDP ActiveX；构建目标还会调用 Windows .NET Framework 的编译器生成独立代理。实际运行应用要求管理员权限，纯单元测试不因此获得操作真实会话的授权。
 
 ```powershell
+dotnet restore DesktopTwin.sln --locked-mode
 dotnet build DesktopTwin.sln -c Release -warnaserror
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-xaml.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-invariants.ps1
@@ -12,6 +13,8 @@ dotnet test DesktopTwin.sln -c Release --no-build
 ```
 
 四步分别检查编译、XAML 绑定/资源、常量单一来源和测试。工作流定义在 `.github/workflows/build.yml`；其他 fork 需要自行检查 Actions 是否启用，没有运行记录不能写成 CI 通过。
+
+CI 另有 Debug 测试、recommended 静态分析、复杂度、架构依赖及核心覆盖率门禁。完整复现命令、规则例外与剩余架构债务见 [质量门禁](docs/quality-gates.md)。普通测试成功不代表覆盖率门禁也已通过。
 
 在 Windows 11 24H2 或更新且支持相对鼠标的机器上，还可运行独立原生控件冒烟检查：
 
@@ -23,7 +26,9 @@ dotnet run --project tests/DesktopTwin.NativeSmoke/DesktopTwin.NativeSmoke.cspro
 
 ## 合并与发布
 
-`main` 要求通过 PR 合并、通过 `build` 检查、保持分支与目标分支同步并解决审查对话；禁止强制推送和删除，管理员也遵守规则。不要求额外审批人数，仓库维护者可合并通过检查的 PR。
+`main` 要求通过 PR 合并、通过 `build` 与 `release-gate` 检查、保持分支与目标分支同步并解决审查对话；禁止强制推送和删除，管理员也遵守规则。不要求额外审批人数，仓库维护者可合并通过检查的 PR。
+
+每修复一项架构问题，在 `build/release-gates.json` 登记对应的必需测试；删除、跳过或缺少这些测试都会阻断打包和发行。规则不得通过新增豁免绕过；确需修改契约时在 PR 中说明行为变化与替代证据。
 
 发布前在 PR 中更新 `DesktopTwin.csproj` 的 `Version`、CHANGELOG 与 `build/release-notes/v<版本>.md`。合并并确认检查通过后，将对应的 `v<版本>` 标签推送到该合并提交。标签工作流会核对版本，构建、测试并生成两个 Windows x64 程序和包含各自 SHA-256 的 README；附件上传完成后公开 Release。不要重建或覆盖历史发行附件，历史迁移保留原文件并注明来源。
 

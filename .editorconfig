@@ -27,3 +27,20 @@ dotnet_diagnostic.CS8601.severity = warning
 dotnet_diagnostic.CS8602.severity = warning
 dotnet_diagnostic.CS8603.severity = warning
 dotnet_diagnostic.CS8604.severity = warning
+
+# Enforce bounded decision complexity and maintainability in every build.
+dotnet_diagnostic.CA1502.severity = warning
+dotnet_diagnostic.CA1505.severity = warning
+dotnet_diagnostic.CA1506.severity = warning
+dotnet_diagnostic.CA1509.severity = warning
+# Keep the instance shape of public APIs; stateless private helpers should be static.
+dotnet_code_quality.CA1822.api_surface = private, internal
+
+[tests/**/*.cs]
+# Scenario names and inline expected arrays keep independent test cases readable.
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1861.severity = none
+
+[tests/DesktopTwin.Tests/Rdp*Tests.cs]
+# These fixtures deliberately inject the COM failures handled by production probes.
+dotnet_diagnostic.CA2201.severity = none

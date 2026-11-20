@@ -6,6 +6,20 @@ namespace DesktopTwin.Tests;
 public sealed class AsyncSnapshotRefreshTests
 {
     [Fact]
+    public async Task RenderingFailurePropagatesWithoutBeingReportedAsCollectionFailure()
+    {
+        var error = new InvalidOperationException("rendering failed");
+        var collectionFailures = 0;
+        var renderCalls = 0;
+        using var refresh = new AsyncSnapshotRefresh<int>(() => Task.FromResult(1),
+            _ => { if (++renderCalls == 1) throw error; }, _ => collectionFailures++);
+        Assert.Same(error, await Assert.ThrowsAsync<InvalidOperationException>(refresh.RequestAsync));
+        Assert.Equal(0, collectionFailures);
+        await refresh.RequestAsync();
+        Assert.Equal(2, renderCalls);
+    }
+
+    [Fact]
     public async Task RequestsDuringCollectionCoalesceAndDiscardOldSnapshot()
     {
         var first = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);

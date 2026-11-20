@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -268,7 +268,7 @@ public static partial class ChildSessionEnvironmentCheck
         return CollectTermsrvBackups(Environment.GetFolderPath(Environment.SpecialFolder.System));
     }
 
-    private static IReadOnlyList<string> CollectTermsrvBackups(string system32)
+    private static List<string> CollectTermsrvBackups(string system32)
     {
         var backups = new List<string>();
         foreach (var name in TermsrvBackupNames)

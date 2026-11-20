@@ -1,7 +1,8 @@
-using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Text;
+using System;
 using DesktopTwin.Services;
 
 namespace DesktopTwin.Localization;
@@ -75,7 +76,7 @@ internal static class Locale
         var template = Get(key);
         try
         {
-            return string.Format(template, args);
+            return string.Format(CultureInfo.CurrentCulture, template, args);
         }
         catch (FormatException)
         {
