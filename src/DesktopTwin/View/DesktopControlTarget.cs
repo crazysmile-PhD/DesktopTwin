@@ -103,7 +103,7 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
         finally
         {
             if (scan != 0) SendKey(scan, true, sessionInput);
-            if (alt) SendKey(0x38, true, sessionInput);
+            if (alt) DiagnosticInput.Key(0x38, true);
         }
     }
 
@@ -124,7 +124,8 @@ internal sealed class DesktopControlTarget(MainWindow window, SettingsService se
 
     private async Task HoldAltForMenuAsync(bool sessionInput, CancellationToken cancellationToken)
     {
-        SendKey(0x38, false, sessionInput);
+        // Coordinate mouse packets go through RDP, so its client must observe the same Alt state.
+        DiagnosticInput.Key(0x38, false);
         if (!sessionInput) { await Task.Delay(200, cancellationToken); return; }
         // Game cursor transitions can take longer than a fixed 200 ms. Never turn a menu click into an attack.
         var deadline = Environment.TickCount64 + 1200;
