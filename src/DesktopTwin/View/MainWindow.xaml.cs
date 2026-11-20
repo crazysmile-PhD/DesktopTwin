@@ -54,6 +54,7 @@ public partial class MainWindow : FluentWindow
 
     private readonly ChildSessionService _childSessionService;
     private readonly SettingsService _settings;
+    private readonly RdpControlContainer _rdpContainer;
     private bool _closeRequestInProgress;
 
     private bool _isFullscreen;
@@ -138,7 +139,10 @@ public partial class MainWindow : FluentWindow
         using (new PerformanceTrace("主窗口 XAML 加载"))
             InitializeComponent();
         using (new PerformanceTrace("RDP 宿主挂载"))
-            RdpFormsHost.Child = RdpHost;
+        {
+            _rdpContainer = new RdpControlContainer(RdpHost);
+            RdpFormsHost.Child = _rdpContainer;
+        }
         _displayResizeTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(300)
@@ -232,7 +236,7 @@ public partial class MainWindow : FluentWindow
         RdpHost.LoginCompleted -= OnDisplayLoginCompleted;
 
         RdpFormsHost.Child = null;
-        RdpHost.Dispose();
+        _rdpContainer.Dispose();
         base.OnClosed(e);
     }
 

@@ -7,6 +7,25 @@ namespace DesktopTwin.Interop;
 /// <summary>连接前配置原生相对鼠标；不支持时尽力恢复绝对输入，继续普通连接。</summary>
 internal static class RdpRelativeMouseOptions
 {
+    /// <summary>
+    /// 登录后重新设置并回读运行时模式；不改动只允许连接前设置的能力开关。
+    /// 回读值仍不等于游戏已捕获相对输入。
+    /// </summary>
+    internal static bool? ReapplyAfterLogin(bool enabled, Action<bool> setRelativeMode, Func<bool> readRelativeMode)
+    {
+        try
+        {
+            setRelativeMode(enabled);
+            return readRelativeMode();
+        }
+        catch (Exception exception) when (exception.GetBaseException() is COMException
+            or MissingMemberException or InvalidCastException or ArgumentException)
+        {
+            AppLog.Warn("登录后应用鼠标模式失败，保留普通输入，不中断连接。", exception.GetBaseException());
+            return null;
+        }
+    }
+
     /// <summary>返回两项设置是否均被接受；不代表服务器已协商或游戏已收到相对输入。</summary>
     internal static bool Apply(bool enabled, Action<bool> allowRelativeMode, Action<bool> setRelativeMode)
     {

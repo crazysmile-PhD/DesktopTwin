@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -104,7 +105,9 @@ public partial class App : Application
         // 只有真正持有互斥体时才记录，OnExit 里据此决定是否 ReleaseMutex。
         _ownsSingleInstanceMutex = true;
 
-        AppLog.Info($"DesktopTwin 启动，版本 {typeof(App).Assembly.GetName().Version}");
+        var assembly = typeof(App).Assembly;
+        var build = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        AppLog.Info($"DesktopTwin 启动，版本 {assembly.GetName().Version}，构建 {build ?? "未知"}");
 
         StartActivationListener();
 

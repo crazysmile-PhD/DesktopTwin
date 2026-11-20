@@ -5,6 +5,9 @@
       "DesktopTwin.Tests.DesktopViewportTests.StartupRestoresSavedPositionFitsTheWorkAreaAndConstrainsDragging",
       "DesktopTwin.Tests.DesktopViewportTests.ResizeAndResolutionChangesPreserveWindowPlacement",
       "DesktopTwin.Tests.DesktopViewportTests.NativeRdpControlReceivesTheFittedRectangleWithoutConnecting",
+      "DesktopTwin.Tests.DesktopViewportTests.NativeControlKeepsItsOriginAndBoundsAcrossAspectAndInternalSizeChanges",
+      "DesktopTwin.Tests.RdpRelativeMouseOptionsTests.LoginRestoresModeAfterConnectionResetsThePreconnectionValue",
+      "DesktopTwin.Tests.RdpRelativeMouseOptionsTests.LoginReadbackDoesNotTreatAcceptedWriteAsRelativeInputEvidence",
       "DesktopTwin.Tests.SettingsServiceTests.升级时恢复可读的自动分辨率且不再自动进入旧小窗"
     ]
   },

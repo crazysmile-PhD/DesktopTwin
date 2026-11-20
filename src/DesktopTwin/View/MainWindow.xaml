@@ -398,7 +398,7 @@
                         </Style.Triggers>
                     </Style>
                 </view:DesktopViewport.Style>
-                <wfi:WindowsFormsHost x:Name="RdpFormsHost" />
+                <wfi:WindowsFormsHost x:Name="RdpFormsHost" Background="Black" />
             </view:DesktopViewport>
 
             <Grid Margin="24"

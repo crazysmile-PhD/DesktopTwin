@@ -85,7 +85,8 @@ public sealed class DesktopViewportTests
     {
         using var rdp = new RdpActiveXHost();
         rdp.Size = new System.Drawing.Size(1920, 1080);
-        using var host = new WindowsFormsHost { Child = rdp };
+        using var container = new RdpControlContainer(rdp);
+        using var host = new WindowsFormsHost { Child = container };
         var viewport = new DesktopViewport { Child = host };
         using var fixture = new WindowFixture(viewport);
 
@@ -107,6 +108,37 @@ public sealed class DesktopViewportTests
             Assert.Equal(0, rdp.ConnectedState);
         }
 
+        host.Child = null;
+    });
+
+    [Fact]
+    public void NativeControlKeepsItsOriginAndBoundsAcrossAspectAndInternalSizeChanges() => RunOnSta(() =>
+    {
+        using var rdp = new RdpActiveXHost();
+        using var container = new RdpControlContainer(rdp);
+        using var host = new WindowsFormsHost { Child = container };
+        var viewport = new DesktopViewport { Child = host };
+        using var fixture = new WindowFixture(viewport);
+        foreach (var ratio in new[] { 954d / 997, 1198d / 643, 1920d / 1080, 954d / 997, 1920d / 1080 })
+        {
+            viewport.AspectRatio = ratio;
+            fixture.Window.Width = 900;
+            fixture.Window.Height = 640;
+            DrainDispatcher();
+            // A native control can revise its extent without changing the WPF layout constraint.
+            rdp.Bounds = new System.Drawing.Rectangle(50, 0, 700, 500);
+            DrainDispatcher();
+            Assert.Equal(System.Drawing.Point.Empty, rdp.Location);
+            Assert.Equal(container.ClientRectangle, rdp.Bounds);
+            Assert.True(WindowNativeMethods.TryGetWindowRect(rdp.Handle, out var bounds));
+            var expectedOrigin = host.PointToScreen(new Point());
+            var expectedEnd = host.PointToScreen(new Point(host.ActualWidth, host.ActualHeight));
+            Assert.InRange(Math.Abs(bounds.Left - expectedOrigin.X), 0, 1);
+            Assert.InRange(Math.Abs(bounds.Top - expectedOrigin.Y), 0, 1);
+            Assert.InRange(Math.Abs(bounds.Right - expectedEnd.X), 0, 1);
+            Assert.InRange(Math.Abs(bounds.Bottom - expectedEnd.Y), 0, 1);
+            Assert.Equal(0, rdp.ConnectedState);
+        }
         host.Child = null;
     });
 
