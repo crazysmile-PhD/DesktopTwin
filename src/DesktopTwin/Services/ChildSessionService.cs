@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -1009,7 +1010,7 @@ public sealed class ChildSessionService : IDisposable
                 2 => Locale.Get("Svc.Conn.Connecting"),
                 _ => Locale.Format("Svc.Conn.Unknown", ConnectedState)
             };
-            var sessionText = ChildSessionId?.ToString() ?? Locale.Get("Check.None");
+            var sessionText = ChildSessionId?.ToString(CultureInfo.InvariantCulture) ?? Locale.Get("Check.None");
             var mainText = _lastOperationMessage ?? connectionText;
             var enabledText = enabled ? Locale.Get("Svc.Status.On") : Locale.Get("Svc.Status.Off");
 
@@ -1464,7 +1465,7 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 取当前分身会话 ID；没有可用会话时抛出 <see cref="InvalidOperationException"/>。
     /// </summary>
-    private uint GetRequiredChildSessionId()
+    private static uint GetRequiredChildSessionId()
     {
         var childSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
         if (childSessionId is null)
@@ -1475,7 +1476,7 @@ public sealed class ChildSessionService : IDisposable
         return childSessionId.Value;
     }
 
-    private void EnsureChildSessionsEnabled()
+    private static void EnsureChildSessionsEnabled()
     {
         if (!ChildSessionNativeMethods.IsChildSessionsEnabled())
         {

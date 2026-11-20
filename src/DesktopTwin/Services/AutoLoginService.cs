@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -147,7 +147,7 @@ internal sealed class AutoLoginService : IDisposable
     /// <summary>
     /// 自动登录使用的域。本地账户就是机器名。
     /// </summary>
-    public string Domain => Environment.UserDomainName;
+    public static string Domain => Environment.UserDomainName;
 
     /// <summary>
     /// 已经存过密码的账户列表（用于设置界面展示，不含任何密码信息）。
@@ -298,7 +298,7 @@ internal sealed class AutoLoginService : IDisposable
     /// <param name="domain">域；本地账户留空即可，微软账户用 MicrosoftAccount。</param>
     /// <param name="password">密码。</param>
     /// <param name="errorCode">Win32 错误码，成功时为 0。</param>
-    public PasswordCheckResult VerifyPassword(
+    public static PasswordCheckResult VerifyPassword(
         string userName,
         string? domain,
         string password,
@@ -367,6 +367,7 @@ internal sealed class AutoLoginService : IDisposable
 
     [DllImport("secur32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1838", Justification = "Bounded Unicode buffer matches the existing Win32 marshalling contract.")]
     private static extern bool GetUserNameEx(
         int nameFormat,
         System.Text.StringBuilder userName,
@@ -439,7 +440,8 @@ internal sealed class AutoLoginService : IDisposable
             {
                 try
                 {
-                    NetApiBufferFree(buffer);
+                    // Cleanup is best effort; its status must not replace the join-query result.
+                    _ = NetApiBufferFree(buffer);
                 }
                 catch (DllNotFoundException)
                 {
@@ -579,7 +581,7 @@ internal sealed class AutoLoginService : IDisposable
     /// 只读状态，不读密码：那个值在注册表里是可还原的，程序没有任何理由去碰它。
     /// </summary>
     /// <param name="userName">已配置的默认登录账户；读不到时为空串。</param>
-    public bool IsSystemAutoLoginEnabled(out string userName)
+    public static bool IsSystemAutoLoginEnabled(out string userName)
     {
         userName = string.Empty;
 
@@ -614,7 +616,7 @@ internal sealed class AutoLoginService : IDisposable
     /// </summary>
     /// <param name="error">失败原因。</param>
     /// <returns>成功拉起进程返回 true。</returns>
-    public bool TryOpenSystemAutoLoginSettings(out string error)
+    public static bool TryOpenSystemAutoLoginSettings(out string error)
     {
         error = string.Empty;
 
@@ -1053,10 +1055,7 @@ internal sealed class AutoLoginService : IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(AutoLoginService));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }
 

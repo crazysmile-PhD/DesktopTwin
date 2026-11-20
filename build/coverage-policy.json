@@ -1,0 +1,8 @@
+{
+  "DesktopTwin.Models.AppSettingsNormalizer": { "line": 0.90, "branch": 0.85 },
+  "DesktopTwin.Services.DiagnosticIssueHistory": { "line": 0.95, "branch": 0.90 },
+  "DesktopTwin.Services.AsyncSnapshotRefresh`1": { "line": 0.90, "branch": 0.80, "asyncMethods": ["RunAsync"] },
+  "DesktopTwin.Services.SessionLaunchTransaction": { "line": 0.90, "branch": 0.80, "asyncMethods": ["ExecuteAsync"] },
+  "DesktopTwin.Services.SessionLogoffOperation": { "line": 0.90, "branch": 0.80, "asyncMethods": ["ObserveAsync"] },
+  "DesktopTwin.Services.SettingsService": { "line": 0.90, "branch": 0.80 }
+}

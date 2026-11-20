@@ -53,11 +53,12 @@
 
 ## 从源码构建
 
-在 Windows 上安装 .NET SDK 10 或能构建此目标的更新 SDK。构建还使用系统 .NET Framework 的 C# 编译器生成嵌入式的一次性程序启动代理。
+在 Windows 上安装 `global.json` 指定的 .NET SDK。构建还使用系统 .NET Framework 的 C# 编译器生成嵌入式的一次性程序启动代理。
 
 ```powershell
 git clone https://github.com/crazysmile-PhD/DesktopTwin.git
 cd DesktopTwin
+dotnet restore DesktopTwin.sln --locked-mode
 dotnet build DesktopTwin.sln -c Release -warnaserror
 dotnet test DesktopTwin.sln -c Release --no-build
 ```
@@ -82,4 +83,5 @@ dotnet publish src/DesktopTwin/DesktopTwin.csproj -c Release -r win-x64 --self-c
 - [性能排查](docs/performance.md)：区分帧率、等待与资源占用。
 - [架构](docs/architecture.md)：线程、操作边界和等待预算。
 - [参与开发](CONTRIBUTING.md)：构建、测试和人工验证范围。
+- [质量门禁](docs/quality-gates.md)：静态分析、架构依赖、覆盖率及剩余债务。
 - [变更记录](CHANGELOG.md)：历史版本；当前行为以本说明及代码为准。

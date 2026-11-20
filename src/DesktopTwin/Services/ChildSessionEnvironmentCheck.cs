@@ -1,9 +1,10 @@
-using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Security;
 using System.Text;
+using System;
 using DesktopTwin.Interop;
 using Microsoft.Win32;
 using DesktopTwin.Localization;
@@ -272,20 +273,20 @@ public static partial class ChildSessionEnvironmentCheck
             ReadInt(
                 RegistryHive.LocalMachine,
                 TerminalServerPolicyRegistryPath,
-                "fDenyTSConnections")?.ToString()
+                "fDenyTSConnections")?.ToString(CultureInfo.InvariantCulture)
             ?? ReadInt(
                 RegistryHive.LocalMachine,
                 TerminalServerRegistryPath,
-                "fDenyTSConnections")?.ToString()
+                "fDenyTSConnections")?.ToString(CultureInfo.InvariantCulture)
             ?? Locale.Get("Check.NotSet"),
             ReadInt(
                 RegistryHive.LocalMachine,
                 TerminalServerPolicyRegistryPath,
-                "fDenyTSConnections")?.ToString()
+                "fDenyTSConnections")?.ToString(CultureInfo.InvariantCulture)
             ?? ReadInt(
                 RegistryHive.LocalMachine,
                 TerminalServerRegistryPath,
-                "fDenyTSConnections")?.ToString()
+                "fDenyTSConnections")?.ToString(CultureInfo.InvariantCulture)
             ?? Locale.Get("Check.NotSet"),
             CanAutoFix: true);
 
@@ -297,12 +298,12 @@ public static partial class ChildSessionEnvironmentCheck
             ReadInt(
                 RegistryHive.LocalMachine,
                 PasswordLessRegistryPath,
-                "DevicePasswordLessBuildVersion")?.ToString()
+                "DevicePasswordLessBuildVersion")?.ToString(CultureInfo.InvariantCulture)
             ?? Locale.Get("Check.NotSet"),
             ReadInt(
                 RegistryHive.LocalMachine,
                 PasswordLessRegistryPath,
-                "DevicePasswordLessBuildVersion")?.ToString()
+                "DevicePasswordLessBuildVersion")?.ToString(CultureInfo.InvariantCulture)
             ?? Locale.Get("Check.NotSet"),
             CanAutoFix: true);
 
@@ -396,14 +397,14 @@ public static partial class ChildSessionEnvironmentCheck
         builder.AppendLine(Locale.Format("Check.Snapshot.Edition", ReadString(RegistryHive.LocalMachine, CurrentVersionRegistryPath, "EditionID") ?? Locale.Get("Check.Unknown")));
         builder.AppendLine(Locale.Format("Check.Snapshot.Product", ReadString(RegistryHive.LocalMachine, CurrentVersionRegistryPath, "ProductName") ?? Locale.Get("Check.Unknown")));
         builder.AppendLine(Locale.Format("Check.Snapshot.RdpPort", ChildSessionNativeMethods.GetConfiguredRdpPort()));
-        builder.AppendLine(Locale.Format("Check.Snapshot.DenyTsConnections", ReadInt(RegistryHive.LocalMachine, TerminalServerRegistryPath, "fDenyTSConnections")?.ToString() ?? Locale.Get("Check.NotSet")));
+        builder.AppendLine(Locale.Format("Check.Snapshot.DenyTsConnections", ReadInt(RegistryHive.LocalMachine, TerminalServerRegistryPath, "fDenyTSConnections")?.ToString(CultureInfo.InvariantCulture) ?? Locale.Get("Check.NotSet")));
         builder.AppendLine(Locale.Format("Check.Snapshot.TermService", DescribeTermService()));
         builder.AppendLine(Locale.Format("Check.Snapshot.ServiceDll", ReadServiceDll() ?? Locale.Get("Check.ReadFailed")));
 
         try
         {
             builder.AppendLine(Locale.Format("Check.Snapshot.ChildSessions", ChildSessionNativeMethods.IsChildSessionsEnabled()));
-            builder.AppendLine(Locale.Format("Check.Snapshot.CurrentSession", ChildSessionNativeMethods.TryGetChildSessionId()?.ToString() ?? Locale.Get("Check.None")));
+            builder.AppendLine(Locale.Format("Check.Snapshot.CurrentSession", ChildSessionNativeMethods.TryGetChildSessionId()?.ToString(CultureInfo.InvariantCulture) ?? Locale.Get("Check.None")));
         }
         catch (Exception exception)
         {
@@ -471,7 +472,7 @@ public static partial class ChildSessionEnvironmentCheck
             "Check.Snapshot.LastFailureValue",
             summary,
             errorCode,
-            extendedErrorCode?.ToString() ?? Locale.Get("Check.None"));
+            extendedErrorCode?.ToString(CultureInfo.InvariantCulture) ?? Locale.Get("Check.None"));
     }
 
     /// <summary>

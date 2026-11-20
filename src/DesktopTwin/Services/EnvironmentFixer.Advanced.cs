@@ -1,11 +1,12 @@
-﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Security;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
+using System.Threading;
+using System;
 using DesktopTwin.Interop;
 using DesktopTwin.Localization;
 using Microsoft.Win32;
@@ -404,7 +405,7 @@ public static partial class EnvironmentFixer
 
         var safetyCopy = Path.Combine(
             GetDataDirectory(),
-            "termsrv.dll.replaced-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            "termsrv.dll.replaced-" + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
 
         try
         {
@@ -681,7 +682,7 @@ public static partial class EnvironmentFixer
             }
 
             // 必须先挂上读再等退出：输出超过管道缓冲区时子进程会卡在写，双方一起等死。
-            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var outputTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
             var started = process;
 
             var deadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
@@ -1032,10 +1033,10 @@ public static partial class EnvironmentFixer
             var directory = GetDataDirectory();
             var path = Path.Combine(directory, "termservice-key-backup.txt");
             var builder = new StringBuilder();
-            builder.AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            builder.AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
             foreach (var deviation in deviations)
             {
-                builder.AppendLine($"{deviation.Field}: {deviation.Current}  ->  {deviation.Expect}");
+                builder.AppendLine(CultureInfo.InvariantCulture, $"{deviation.Field}: {deviation.Current}  ->  {deviation.Expect}");
             }
 
             File.WriteAllText(path, builder.ToString());
@@ -1062,7 +1063,7 @@ public static partial class EnvironmentFixer
         var directory = Path.Combine(
             GetDataDirectory(),
             "rdp-tool-backup",
-            DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(directory);
         return directory;
     }
@@ -1204,7 +1205,7 @@ public static partial class EnvironmentFixer
                 hash = (hash ^ ch) * 1099511628211ul;
             }
 
-            return hash.ToString("x16");
+            return hash.ToString("x16", CultureInfo.InvariantCulture);
         }
     }
 
