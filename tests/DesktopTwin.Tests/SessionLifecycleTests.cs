@@ -78,6 +78,36 @@ public sealed class SessionLifecycleTests
         Assert.True((bool)Invoke(service, "IsConnectionAttemptInProgress"));
     }
 
+    [Fact]
+    public void MissingSettingsReconnectCallbackExpiresOnceAndPreservesPendingSettings()
+    {
+        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        var pending = Field(service, "_pendingRdpSettingChanges");
+        pending.SetValue(service, Enum.ToObject(pending.FieldType, 2));
+        Set(service, "_rdpSettingsReconnectActive", true);
+        Set(service, "_rdpSettingsReconnectRetriesRemaining", 3);
+        Set(service, "_attemptDeadlineTick", Environment.TickCount64 - 1);
+        Assert.True((bool)Invoke(service, "ExpireSettingsReconnect"));
+        Assert.False((bool)Get(service, "_rdpSettingsReconnectActive"));
+        Assert.Equal(0, (int)Get(service, "_rdpSettingsReconnectRetriesRemaining"));
+        Assert.Equal(1, (int)Get(service, "_settingsReconnectGeneration"));
+        Assert.Equal(2, Convert.ToInt32(Get(service, "_pendingRdpSettingChanges")));
+        Assert.False((bool)Invoke(service, "ExpireSettingsReconnect"));
+    }
+
+    [Fact]
+    public void RetryDelayAndFreshAttemptDoNotExpireUsingOldDeadline()
+    {
+        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        Set(service, "_rdpSettingsReconnectActive", true);
+        Set(service, "_rdpSettingsReconnectRetryInProgress", true);
+        Set(service, "_attemptDeadlineTick", Environment.TickCount64 - 1);
+        Assert.False((bool)Invoke(service, "ExpireSettingsReconnect"));
+        Set(service, "_rdpSettingsReconnectRetryInProgress", false);
+        Invoke(service, "MarkAttemptStarted");
+        Assert.False((bool)Invoke(service, "ExpireSettingsReconnect"));
+    }
+
     private static FieldInfo Field(object target, string name) =>
         target.GetType().GetField(name, Private) ?? throw new MissingFieldException(name);
     private static object Get(object target, string name) => Field(target, name).GetValue(target)
