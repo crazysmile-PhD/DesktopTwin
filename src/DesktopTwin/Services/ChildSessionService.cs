@@ -596,8 +596,8 @@ public sealed class ChildSessionService : IDisposable
             {
                 _autoLaunchPending = false;
                 _initialConnectionRetriesRemaining = 0;
-                CompleteConnectionFailure(CreateConnectionTimeoutFailure());
                 TryDisconnectRdpHost();
+                CompleteConnectionFailure(CreateConnectionTimeoutFailure());
                 return;
             }
 
@@ -1433,6 +1433,18 @@ public sealed class ChildSessionService : IDisposable
                || _rdpSettingsReconnectActive;
     }
 
+    private bool ExpireSettingsReconnect()
+    {
+        if (!_rdpSettingsReconnectActive || _rdpSettingsReconnectRetryInProgress
+            || Environment.TickCount64 < _attemptDeadlineTick) return false;
+        _rdpSettingsReconnectActive = false;
+        _rdpSettingsReconnectRetriesRemaining = 0;
+        _settingsReconnectGeneration++;
+        _desktopWindow?.RdpHost.CancelPendingReconnect();
+        // 待应用设置留给下一次显式连接，超时本身不继续消耗重试或认证次数。
+        return true;
+    }
+
     private void OnStatusTimerTick(object? sender, EventArgs e)
     {
         if (_statusTickInProgress || _disposed)
@@ -1444,6 +1456,11 @@ public sealed class ChildSessionService : IDisposable
         try
         {
             RefreshState();
+            if (ExpireSettingsReconnect())
+            {
+                TryDisconnectRdpHost();
+                CompleteConnectionFailure(CreateConnectionTimeoutFailure());
+            }
 
             // 连接中且开了自动登录：开始盯着可能出现的凭据弹窗。
             // 放在状态轮询里而不是每个连接入口各写一遍，重连、重试、设置变更全覆盖。
@@ -1759,6 +1776,7 @@ public sealed class ChildSessionService : IDisposable
             RefreshState(
                 Locale.Format("Svc.Status.RdpReconnectRetryNow", retryNumber, RdpSettingsReconnectRetryCount));
             _rdpSettingsReconnectRetryInProgress = false;
+            MarkAttemptStarted();
             EnsureDesktopWindow().RdpHost.ReconnectToChildSession(DesktopSize);
         }
         catch (OperationCanceledException)
@@ -1883,6 +1901,8 @@ public sealed class ChildSessionService : IDisposable
         _lastConnectionFailure = diagnosed;
         _autoLaunchPending = false;
         _initialConnectionRetriesRemaining = 0;
+        _rdpSettingsReconnectActive = false;
+        _rdpSettingsReconnectRetryInProgress = false;
         _credentialFailureSuspected = IsLikelyCredentialFailure(diagnosed);
 
         // 留给「复制环境信息」：环境全绿却连不上时，这一行通常才是关键。
@@ -2022,6 +2042,7 @@ public sealed class ChildSessionService : IDisposable
         _pendingRdpSettingChanges |= settingChange;
         _rdpSettingsReconnectActive = true;
         _rdpSettingsReconnectRetriesRemaining = RdpSettingsReconnectRetryCount;
+        MarkAttemptStarted();
         try
         {
             window.RdpHost.ReconnectToChildSession(DesktopSize);
