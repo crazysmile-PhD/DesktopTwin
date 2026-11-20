@@ -53,4 +53,15 @@ public sealed class ArchitectureTests
             .HaveDependencyOnAny("DesktopTwin.View", "DesktopTwin.ViewModel", "DesktopTwin.Interop", "System.Windows").GetResult();
         Assert.True(result.IsSuccessful, string.Join(", ", result.FailingTypeNames ?? []));
     }
+
+    [Fact]
+    public void CredentialPolicyDoesNotDependOnUiStorageOrNativePlatform()
+    {
+        var result = Types.InAssembly(typeof(AppSettings).Assembly).That()
+            .ResideInNamespace("DesktopTwin.Credentials").ShouldNot()
+            .HaveDependencyOnAny("DesktopTwin.Services", "DesktopTwin.View", "DesktopTwin.ViewModel",
+                "DesktopTwin.Interop", "System.Windows", "Microsoft.Win32", "System.IO",
+                "System.Runtime.InteropServices").GetResult();
+        Assert.True(result.IsSuccessful, string.Join(", ", result.FailingTypeNames ?? []));
+    }
 }

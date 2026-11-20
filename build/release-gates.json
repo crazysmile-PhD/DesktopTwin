@@ -16,5 +16,16 @@
       "DesktopTwin.Tests.DesktopSessionHostTests.ConfigurationFailureClosesPartialViewAndAllowsCleanRetry",
       "DesktopTwin.Tests.DesktopSessionHostTests.FailedCleanupRetainsBothCauses"
     ]
+  },
+  "CRED001": {
+    "description": "Credential policy is platform independent; account operations preserve encrypted reader snapshots and reject failed protection.",
+    "tests": [
+      "DesktopTwin.Tests.ArchitectureTests.CredentialPolicyDoesNotDependOnUiStorageOrNativePlatform",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.AccountOperationsAreCaseInsensitiveAndIsolated",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.EncryptionFailurePreservesExistingSecretAndDoesNotScheduleSave",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.PublishedTablesDoNotMutateEarlierReaderSnapshots",
+      "DesktopTwin.Tests.AccountCredentialStoreTests.ReadsUseCurrentCiphertextAndNeverCachePlaintext",
+      "DesktopTwin.Tests.DpapiProtectorTests.SyntheticSecretRoundTripsThroughWindowsProtection"
+    ]
   }
 }
