@@ -84,7 +84,9 @@ internal sealed class LocalControlBridge : IDisposable
                 }
                 finally
                 {
-                    if (!_stop.IsCancellationRequested && _pipe.IsConnected) _pipe.Disconnect();
+                    // A read from a disconnected peer marks the stream Broken, so IsConnected
+                    // is false even though Disconnect is still required before the next accept.
+                    if (!_stop.IsCancellationRequested) _pipe.Disconnect();
                 }
             }
         }

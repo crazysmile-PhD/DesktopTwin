@@ -17,7 +17,8 @@
       "DesktopTwin.Tests.LocalControlBridgeTests.BridgeIsOptInAndRequiresAnUnambiguousLocalPipeName",
       "DesktopTwin.Tests.LocalControlBridgeTests.MovementDurationAndResizeRequestsAreBounded",
       "DesktopTwin.Tests.LocalControlBridgeTests.MalformedClientDoesNotStopTheNextValidRequest",
-      "DesktopTwin.Tests.LocalControlBridgeTests.SlowReaderReceivesTheWholeReplyBeforeTheServerDisconnects"
+      "DesktopTwin.Tests.LocalControlBridgeTests.SlowReaderReceivesTheWholeReplyBeforeTheServerDisconnects",
+      "DesktopTwin.Tests.LocalControlBridgeTests.ClientDisconnectBeforeReplyDoesNotStopTheServer"
     ]
   },
   "ARCH001": {

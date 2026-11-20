@@ -93,14 +93,17 @@ public sealed class LocalControlBridgeTests
     {
         var name = "DesktopTwin.Control." + Guid.NewGuid().ToString("N");
         using var bridge = new LocalControlBridge(name, (request, _) => Task.FromResult<object>(new { command = request.Command }));
-        using (var abandoned = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous))
+        for (var index = 0; index < 10; index++)
         {
-            await abandoned.ConnectAsync(2000);
-            // End the connection halfway through its length prefix.
-            await abandoned.WriteAsync(new byte[] { 10, 0 });
+            using (var abandoned = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous))
+            {
+                await abandoned.ConnectAsync(2000);
+                // End the connection halfway through its length prefix.
+                await abandoned.WriteAsync(new byte[] { 10, 0 });
+            }
+            using var response = await SendAsync(name, "{\"command\":\"state\"}");
+            Assert.True(response.RootElement.GetProperty("ok").GetBoolean());
         }
-        using var response = await SendAsync(name, "{\"command\":\"state\"}");
-        Assert.True(response.RootElement.GetProperty("ok").GetBoolean());
     }
 
     private static async Task<JsonDocument> SendAsync(string name, string json)
