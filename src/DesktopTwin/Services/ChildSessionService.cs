@@ -390,7 +390,7 @@ public sealed class ChildSessionService : IDisposable
     {
         ThrowIfDisposed();
 
-        // 和 ConnectDesktopInBackgroundAsync 同理：后台流程（UU 切回分身的重连兜底）
+        // 后台的 UU 切换流程
         // 调过来时已经在池线程上，而下面要碰 RDP 控件和窗口。WPF 对象只认创建它的
         // 线程，不切回去就直接抛 InvalidOperationException——兜底反而成了故障点。
         if (_dispatcher.CheckAccess())
@@ -647,19 +647,14 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 断开分身桌面，但保留会话（桌面里的程序继续运行）。
     ///
-    /// 供 UU 视角切换使用：UU 的被控端只会挑会话号最大的已登录桌面，
-    /// 把分身断开它就只能落到 Console。
+    /// 供 UU 视角切换使用；串流端是否选择主机由切换服务另行确认。
     /// </summary>
     /// <returns>确实发起了断开返回 true。</returns>
-    public bool DisconnectDesktopForSwitch()
+    public Task<bool> DisconnectDesktopForSwitchAsync(CancellationToken cancellationToken)
     {
-        // 与 StartAsync 同理：切换流程在线程池上跑，这里要碰 RDP 控件。
-        if (!_dispatcher.CheckAccess())
-        {
-            return _dispatcher.Invoke(DisconnectDesktopForSwitchCore);
-        }
-
-        return DisconnectDesktopForSwitchCore();
+        cancellationToken.ThrowIfCancellationRequested();
+        return _dispatcher.InvokeAsync(DisconnectDesktopForSwitchCore,
+            DispatcherPriority.Normal, cancellationToken).Task;
     }
 
     private bool DisconnectDesktopForSwitchCore()
@@ -791,143 +786,6 @@ public sealed class ChildSessionService : IDisposable
             && operationGeneration == StartGeneration
             && ChildSessionNativeMethods.TryGetChildSessionId() is { } finalId
             && ChildSessionNativeMethods.IsSessionActive(finalId);
-    }
-
-    /// <summary>
-    /// 把分身重新连上但不显示窗口，并最小化到任务栏。
-    ///
-    /// 用途是「切到整台电脑」之后的收尾：UU 的串流端已经落到主桌面了，
-    /// 这时把分身挂回后台不会影响它的选择，而下次切回分身就能秒切——
-    /// 不用重新走一遍连接握手。原版社区脚本把这个行为叫 keep_child_connected。
-    /// </summary>
-    /// <param name="minimizeWindow">
-    /// 连上之后要不要把分身窗口最小化。切换成功时为 true（分身退到后台）；
-    /// 切换失败、只是把连接恢复回来时为 false——那时用户正看着这个窗口，
-    /// 缩下去等于让他自己去任务栏里找回来。
-    /// </param>
-    public Task<bool> ConnectDesktopInBackgroundAsync(
-        CancellationToken cancellationToken,
-        bool minimizeWindow = true)
-    {
-        ThrowIfDisposed();
-
-        // 调用方多半在线程池上（切换流程里到处是 ConfigureAwait(false)），
-        // 而下面要碰 RDP 控件和窗口——WPF 对象只认创建它的线程，
-        // 必须先切回 UI 线程，否则直接抛 InvalidOperationException。
-        if (_dispatcher.CheckAccess())
-        {
-            return ConnectDesktopInBackgroundCoreAsync(cancellationToken, minimizeWindow);
-        }
-
-        return _dispatcher
-            .InvokeAsync(() => ConnectDesktopInBackgroundCoreAsync(cancellationToken, minimizeWindow))
-            .Task
-            .Unwrap();
-    }
-
-    private async Task<bool> ConnectDesktopInBackgroundCoreAsync(
-        CancellationToken cancellationToken,
-        bool minimizeWindow)
-    {
-        try
-        {
-            // 代际要在最开头捕获：下面「等 RDP 控件断开」可能等好几秒，
-            // 期间用户完全可能点了注销，那时再捕获就已经是新代际，检查等于没做。
-            var startGeneration = _startGeneration;
-
-            var host = EnsureDesktopWindow().RdpHost;
-
-            // 等 RDP 控件真正回到「已断开」。
-            //
-            // ConnectToChildSession 开头有 `if (ConnectedState != 0) return;`：
-            // 刚断开时控件还停在连接/断开中的状态，这次重连会被静默跳过。
-            for (var attempt = 0; attempt < 25 && host.ConnectedState != 0; attempt++)
-            {
-                await Task.Delay(200, cancellationToken).ConfigureAwait(true);
-            }
-
-            // 断开是「有意」的，靠 OnDisconnected 回调复位标志；回调丢了就会一直卡在
-            // 「正在断开」，后续连接只排队不执行。
-            host.ResetDisconnectState();
-
-            // 直接走完整启动流程，而不是 ReconnectToChildSession。
-            //
-            // 后者在控件刚断开时会抛 InvalidCastException：
-            //   Unable to cast COM object to interface type 'IMsRdpExtendedSettings'
-            //   不支持此接口 (0x80004002 E_NOINTERFACE)
-            // 异常发生在 ConnectToChildSession 的「设置 ConnectToChildSession」那一步，
-            // 一个连接都发不起来。而 StartAsync 这条路（用户再按一次热键走的正是它）
-            // 实测是能连上的，所以后台重连直接复用它。
-            // 最多试两次。第一次失败最常见的原因是控件状态还没稳定，
-            // 隔 3 秒重来一次基本都能成——比让用户自己再按一次热键强。
-            var connected = false;
-
-            for (var attempt = 1; attempt <= 2; attempt++)
-            {
-                // 注销或释放会推进代际：这之后不能再发起启动，否则会把用户
-                // 刚关掉的会话又建回来。
-                if (_disposed || startGeneration != _startGeneration)
-                {
-                    AppLog.Info("后台重连已被注销或释放取代，停止重试。");
-                    return false;
-                }
-
-                host.ResetDisconnectState();
-                await StartAsync().ConfigureAwait(true);
-
-                // Connected 属性和会话状态会脱节：断开后属性可能还是 1，
-                // 于是看起来「已连上」，而实际会话停在 Disconnected。两个都要查。
-                connected = host.ConnectedState == 1
-                    && ChildSessionNativeMethods.TryGetChildSessionId() is { } sessionId
-                    && ChildSessionNativeMethods.IsSessionActive(sessionId);
-
-                if (connected)
-                {
-                    break;
-                }
-
-                if (attempt < 2)
-                {
-                    // 控件可能停在「属性说已连接、会话其实是断的」这种假象上，
-                    // 不先断掉，下一次 StartAsync 会被开头的 ConnectedState 判断直接跳过。
-                    if (host.ConnectedState == 1)
-                    {
-                        try
-                        {
-                            _ = host.Disconnect();
-                        }
-                        catch (Exception exception) when (IsExpectedChildSessionException(exception))
-                        {
-                            AppLog.Warn("后台重连：重试前断开失败，忽略。", exception);
-                        }
-
-                        await Task.Delay(600, cancellationToken).ConfigureAwait(true);
-                    }
-
-                    AppLog.Warn($"后台重连分身：第 {attempt} 次未成功，3 秒后重试。");
-                    await Task.Delay(3000, cancellationToken).ConfigureAwait(true);
-                }
-            }
-
-            AppLog.Info(connected
-                ? Locale.Get("Svc.Background.Reconnected")
-                : Locale.Get("Svc.Background.ReconnectFailed"));
-
-            var window = _desktopWindow;
-            if (minimizeWindow && window is not null && window.IsVisible)
-            {
-                window.WindowState = WindowState.Minimized;
-            }
-
-            return connected;
-        }
-        catch (Exception exception) when (IsExpectedChildSessionException(exception))
-        {
-            // 之前这里不捕获：异常沿着 fire-and-forget 的 Task 传上去被吞掉，
-            // 日志里只留下一条「KeyboardHookMode」就断了。
-            AppLog.Warn("后台重连分身时出错。", exception);
-            return false;
-        }
     }
 
     /// <summary>

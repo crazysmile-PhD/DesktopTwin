@@ -78,6 +78,8 @@ internal sealed class SessionAgentService : IDisposable
     private readonly string _dataDirectory;
     private readonly Dispatcher _dispatcher;
     private DispatcherTimer? _pollTimer;
+    private FileSystemWatcher? _requestWatcher;
+    private int _requestNotificationQueued;
     private DateTime _lastRequestSeen = DateTime.MinValue;
     private long _lastLaunchTickCount = -1;
     private string _hotkeyArgument = "Ctrl+Alt+U";
@@ -92,7 +94,7 @@ internal sealed class SessionAgentService : IDisposable
     /// <summary>进程探测结果缓存（3 秒）。</summary>
     private long _lastAgentProbeTicks = -100_000;
     private bool _lastAgentProbeResult;
-    private bool _disposed;
+    private volatile bool _disposed;
     private bool _startInProgress;
     private CancellationTokenSource? _startCancellation;
     private int _configurationGeneration;
@@ -478,16 +480,45 @@ internal sealed class SessionAgentService : IDisposable
 
         _pollTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
-            // 切换本身要断开、重连、等 UU 重新挑会话，好几秒起步，
-            // 这里没必要做毫秒级响应；1.5 秒一次足够，也更省电。
+            // 文件通知负责即时请求；此轮询只做健康检查及通知丢失时的兜底。
             Interval = TimeSpan.FromMilliseconds(1500)
         };
         _pollTimer.Tick += OnPollTick;
         _pollTimer.Start();
+        try
+        {
+            _requestWatcher = new FileSystemWatcher(_dataDirectory, RequestFileName)
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
+            };
+            _requestWatcher.Changed += OnRequestFileChanged;
+            _requestWatcher.Created += OnRequestFileChanged;
+            _requestWatcher.EnableRaisingEvents = true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+            or System.ComponentModel.Win32Exception)
+        {
+            _requestWatcher?.Dispose();
+            _requestWatcher = null;
+            AppLog.Warn("热键请求文件监听不可用，使用低频轮询兜底。", exception);
+        }
+    }
+
+    private void OnRequestFileChanged(object sender, FileSystemEventArgs e)
+    {
+        if (_disposed || _dispatcher.HasShutdownStarted
+            || Interlocked.Exchange(ref _requestNotificationQueued, 1) != 0) return;
+        _ = _dispatcher.BeginInvoke(new Action(() =>
+        {
+            Interlocked.Exchange(ref _requestNotificationQueued, 0);
+            OnPollTick(this, EventArgs.Empty);
+        }));
     }
 
     private void StopPolling()
     {
+        _requestWatcher?.Dispose();
+        _requestWatcher = null;
         if (_pollTimer is null)
         {
             return;
@@ -534,7 +565,10 @@ internal sealed class SessionAgentService : IDisposable
         }
 
         AppLog.Info("收到分身端的热键请求，开始切换。");
-        _dispatcher.BeginInvoke(() => SwitchRequested?.Invoke(this, EventArgs.Empty));
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_disposed && _pollTimer is not null) SwitchRequested?.Invoke(this, EventArgs.Empty);
+        });
     }
 
     private static string BuildCommandLine(string hotkey)
