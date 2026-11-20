@@ -12,6 +12,48 @@ public sealed class SessionLifecycleTests
     private const BindingFlags Private = BindingFlags.NonPublic | BindingFlags.Instance;
 
     [Fact]
+    public Task ExitJoinsTheAcceptedRequestWithoutWaitingForWindowsCleanup() => RunOnStaAsync(async () =>
+    {
+        // 已有注销在途，只替换任务信号；绝不创建窗口或调用真实 WTS 注销。
+        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        Set(service, "_dispatcher", Dispatcher.CurrentDispatcher);
+        Set(service, "_environmentGate", new object());
+        Set(service, "_sessionClosing", true);
+        var request = new TaskCompletionSource<uint?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Set(service, "_logoffRequest", request.Task);
+        Set(service, "_logoffOperation", cleanup.Task);
+        var firstExit = service.RequestLogoffForExitAsync();
+        var secondExit = service.RequestLogoffForExitAsync();
+        Assert.False(firstExit.IsCompleted);
+        Assert.False(secondExit.IsCompleted);
+
+        request.SetResult(17);
+        await Task.WhenAll(firstExit, secondExit).WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(cleanup.Task.IsCompleted);
+        Assert.True((bool)Get(service, "_exitRequested"));
+        Assert.Same(cleanup.Task, Get(service, "_logoffOperation"));
+        var start = (Task)Invoke(service, "StartSharedAsync", (int?)null);
+        Assert.True(start.IsCompletedSuccessfully);
+        cleanup.SetResult();
+    });
+
+    [Fact]
+    public Task ExitDoesNotTreatRejectedLogoffRequestAsAccepted() => RunOnStaAsync(async () =>
+    {
+        var service = (ChildSessionService)RuntimeHelpers.GetUninitializedObject(typeof(ChildSessionService));
+        Set(service, "_dispatcher", Dispatcher.CurrentDispatcher);
+        var request = new TaskCompletionSource<uint?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Set(service, "_logoffRequest", request.Task);
+        Set(service, "_logoffOperation", cleanup.Task);
+        var exit = service.RequestLogoffForExitAsync();
+        request.SetException(new System.ComponentModel.Win32Exception(5));
+        await Assert.ThrowsAsync<System.ComponentModel.Win32Exception>(() => exit);
+        cleanup.SetResult();
+    });
+
+    [Fact]
     public Task OldInitialRetryCannotClearReplacementAttempt() => RunOnStaAsync(async () =>
     {
         // Never construct or dispose an RDP window: Dispose logs off a real user session.
