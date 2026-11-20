@@ -35,6 +35,14 @@ internal static class AppSettingsNormalizer
 
         // Version 1 changed the default from smart sizing to native resolution.
         if (settings.SettingsVersion < 1) settings = settings with { Session = settings.Session with { SmartSizing = false } };
+        if (settings.SettingsVersion < 2)
+        {
+            settings = settings with
+            {
+                Session = settings.Session with { AutomaticDesktopSize = true, SmartSizing = true },
+                Window = settings.Window with { SmallWindowMode = false }
+            };
+        }
         settings = settings with { SettingsVersion = AppSettings.CurrentVersion };
         return true;
     }

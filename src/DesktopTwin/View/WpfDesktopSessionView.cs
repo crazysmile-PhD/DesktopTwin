@@ -17,11 +17,16 @@ internal sealed class WpfDesktopSessionView : IDesktopSessionView
         _window = window;
         RdpHost = new RdpSessionClient(window.RdpHost);
         window.IsVisibleChanged += OnVisibilityChanged;
+        window.RdpHost.DesktopSizeChanged += OnDesktopSizeChanged;
     }
 
     public bool IsVisible => _window.IsVisible;
+    public Size? AvailableDesktopSize => _window.IsLoaded ? _window.GetWindowDisplaySettings().DesktopSize : null;
+    public Size? ReportedDesktopSize => _window.RdpHost.ReportedDesktopSize;
     public IRdpSessionClient RdpHost { get; }
     public event EventHandler? VisibilityChanged;
+    public event EventHandler? DesktopSizeChanged;
+    private void OnDesktopSizeChanged(object? sender, EventArgs e) => DesktopSizeChanged?.Invoke(this, e);
     private void OnVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) =>
         VisibilityChanged?.Invoke(this, EventArgs.Empty);
 
@@ -36,6 +41,7 @@ internal sealed class WpfDesktopSessionView : IDesktopSessionView
     public void Close()
     {
         _window.IsVisibleChanged -= OnVisibilityChanged;
+        _window.RdpHost.DesktopSizeChanged -= OnDesktopSizeChanged;
         _window.AllowClose = true;
         _window.Close();
     }

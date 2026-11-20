@@ -14,6 +14,7 @@ internal sealed class DesktopSessionHost(
     internal IDesktopSessionView? Current { get; private set; }
     internal event EventHandler? VisibilityChanged;
     internal event EventHandler? LoginCompleted;
+    internal event EventHandler? DesktopSizeChanged;
     internal event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed;
 
     internal IDesktopSessionView GetOrCreate()
@@ -41,12 +42,14 @@ internal sealed class DesktopSessionHost(
             throw;
         }
         view.VisibilityChanged += OnVisibilityChanged;
+        view.DesktopSizeChanged += OnDesktopSizeChanged;
         view.RdpHost.LoginCompleted += OnLoginCompleted;
         view.RdpHost.ConnectionFailed += OnConnectionFailed;
         return Current = view;
     }
 
     private void OnVisibilityChanged(object? sender, EventArgs e) => VisibilityChanged?.Invoke(this, e);
+    private void OnDesktopSizeChanged(object? sender, EventArgs e) => DesktopSizeChanged?.Invoke(this, e);
     private void OnLoginCompleted(object? sender, EventArgs e) => LoginCompleted?.Invoke(this, e);
     private void OnConnectionFailed(object? sender, ChildSessionConnectionFailedEventArgs e) => ConnectionFailed?.Invoke(this, e);
 
@@ -58,6 +61,7 @@ internal sealed class DesktopSessionHost(
         Current = null;
         if (view is null) return;
         view.VisibilityChanged -= OnVisibilityChanged;
+        view.DesktopSizeChanged -= OnDesktopSizeChanged;
         view.RdpHost.LoginCompleted -= OnLoginCompleted;
         view.RdpHost.ConnectionFailed -= OnConnectionFailed;
         view.Close();

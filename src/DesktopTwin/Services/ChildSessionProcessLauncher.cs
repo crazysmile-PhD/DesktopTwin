@@ -110,6 +110,15 @@ public static class ChildSessionProcessLauncher
         }
     }
 
+    /// <summary>Starts only the bundled input receiver; readiness is confirmed separately by its input channel.</summary>
+    internal static Task LaunchInputReceiverAsync(uint sessionId, string path, string arguments, CancellationToken token)
+    {
+        var fullPath = ValidateExecutablePath(path);
+        return TrackLaunch(cancel => LaunchWithTemporaryTaskAsync(sessionId, fullPath, arguments,
+            Path.GetDirectoryName(fullPath) ?? AppContext.BaseDirectory, true, TaskNamePrefix,
+            ChildSessionNativeMethods.TryGetChildSessionId, cancel, requireWindow: false), token);
+    }
+
     /// <summary>正常退出先停止接收启动、取消等待并等待清理；不把清理遗留到下次启动。</summary>
     internal static async Task StopAsync()
     {
@@ -445,7 +454,7 @@ public static class ChildSessionProcessLauncher
 
     internal static async Task LaunchWithTemporaryTaskAsync(uint childSessionId, string executablePath,
         string arguments, string workingDirectory, bool runAsAdministrator,
-        string taskNamePrefix, Func<uint?> getSessionId, CancellationToken cancellationToken)
+        string taskNamePrefix, Func<uint?> getSessionId, CancellationToken cancellationToken, bool requireWindow = true)
     {
         void ValidateSession()
         {
@@ -526,7 +535,7 @@ public static class ChildSessionProcessLauncher
                     // Last authorization point: the temporary task is already verified absent.
                     ValidateSession();
                     return channel.LaunchAndConfirmAsync(executablePath, arguments, workingDirectory,
-                        cancellationToken);
+                        cancellationToken, requireWindow: requireWindow);
                 }, cancellationToken).ConfigureAwait(false);
         }
         finally

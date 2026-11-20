@@ -71,6 +71,11 @@ internal static class WindowNativeMethods
             SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpNoOwnerZOrder);
     }
 
+    /// <summary>以物理像素设置窗口位置和尺寸，不改变焦点与 Z 序。</summary>
+    internal static void SetWindowBounds(IntPtr window, int left, int top, int width, int height) =>
+        _ = SetWindowPos(window, IntPtr.Zero, left, top, width, height,
+            SwpNoZOrder | SwpNoActivate | SwpNoOwnerZOrder);
+
     /// <summary>
     /// 把窗口移入/移出置顶带（WS_EX_TOPMOST）。
     ///

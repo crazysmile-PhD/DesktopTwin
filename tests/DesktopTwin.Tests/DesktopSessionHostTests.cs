@@ -39,15 +39,18 @@ public sealed class DesktopSessionHostTests
         using var host = new DesktopSessionHost(() => view, () => new SessionSettings(), () => null);
         var visibility = 0;
         var logins = 0;
+        var sizes = 0;
         var error = new ChildSessionConnectionFailedEventArgs("failure", 42);
         ChildSessionConnectionFailedEventArgs? received = null;
         host.VisibilityChanged += (_, _) => visibility++;
         host.LoginCompleted += (_, _) => logins++;
+        host.DesktopSizeChanged += (_, _) => sizes++;
         host.ConnectionFailed += (_, value) => received = value;
         host.GetOrCreate();
         view.RaiseEvents(error);
         Assert.Equal(1, visibility);
         Assert.Equal(1, logins);
+        Assert.Equal(1, sizes);
         Assert.Same(error, received);
         received = null;
         host.Dispose();
@@ -57,6 +60,7 @@ public sealed class DesktopSessionHostTests
         Assert.Equal(1, visibility);
         Assert.Equal(1, logins);
         Assert.Null(received);
+        Assert.Equal(1, sizes);
     }
 
     [Fact]
@@ -104,8 +108,11 @@ public sealed class DesktopSessionHostTests
         internal int CloseCalls { get; private set; }
         internal Exception? CloseFailure { get; init; }
         public bool IsVisible => false;
+        public Size? AvailableDesktopSize => null;
+        public Size? ReportedDesktopSize => null;
         public IRdpSessionClient RdpHost => Client;
         public event EventHandler? VisibilityChanged;
+        public event EventHandler? DesktopSizeChanged;
         public void ShowAndActivate() { }
         public void Hide() { }
         public void Close()
@@ -117,6 +124,7 @@ public sealed class DesktopSessionHostTests
         internal void RaiseEvents(ChildSessionConnectionFailedEventArgs error)
         {
             VisibilityChanged?.Invoke(this, EventArgs.Empty);
+            DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
             Client.RaiseEvents(error);
         }
     }

@@ -13,6 +13,7 @@
 | `TrayIconController` | 托盘菜单与具体窗口的呈现交互，属于 View 层 |
 | `ChildSessionService` | 子会话连接、注销、设置重连、状态发布 |
 | `RdpActiveXHost` | MsRdpClient10 COM 配置、回调和控件层排队重连 |
+| `DesktopViewport` | 按桌面分辨率在可用区域内等比居中安排原生 RDP 宿主，窗口与全屏共用布局 |
 | `ChildSessionProcessLauncher` / `SessionLaunchWorker` | 临时任务只引导独立启动代理进入指定会话；清理后授权启动并核对回执 |
 | `ChildSessionEnvironmentCheck` / `EnvironmentFixer` | 诊断采集与显式系统修复 |
 | `AsyncSnapshotRefresh<T>` | 合并界面的异步采集请求，丢弃过期/关闭后的结果 |
@@ -25,6 +26,20 @@
 App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 `IDesktopSessionView`、`IRdpSessionClient`，不创建或引用具体窗口和 ActiveX 控件。视窗配置失败会关闭部分创建的视窗，重试时重新创建；关闭前先解除事件订阅。
 
 架构测试禁止任何服务依赖具体窗口，没有豁免名单；契约和 DesktopSessionHost 也不能依赖 WPF 或 Interop。服务层仍使用 UI Dispatcher 调度和 WTS 平台接口，连接重试也仍分布在服务和控件两层。ViewModel 通过幂等 `Dispose` 释放资源；WPF 窗口在关闭时调用。发布门禁和后续拆分见 [质量门禁](quality-gates.md)。
+
+## 画面布局
+
+`DesktopViewport` 根据 `DesktopAspectRatio` 测量并安排 `WindowsFormsHost` 的实际矩形，不使用视觉变换缩放原生 HWND。窗口贴边、调整尺寸、隐藏恢复及分辨率变更均由 WPF 布局重新计算；多余空间露出父容器的黑色背景，不再改写系统分屏给出的外层窗口尺寸。比例固定跟随分身分辨率，旧版 `KeepAspectRatio` 设置不再参与运行。
+
+`WindowsFormsHost` 安排 `RdpControlContainer`，由容器的 Dock 布局保持 ActiveX 的原点与填充尺寸，容器负责释放其子控件。直接承载 ActiveX 时，控件自行改变原生尺寸后，WPF 相同的布局约束可能不会再覆盖该尺寸；对应实现见 [.NET WPF 的 ArrangeOverride](https://github.com/dotnet/wpf/blob/main/src/Microsoft.DotNet.Wpf/src/WindowsFormsIntegration/System/Windows/Integration/WindowsFormsHost.cs)。新回归测试覆盖纵向/横向比例往返和控件自行偏移；远端分辨率变化与登录完成也会排队刷新原生缩放，即使属性值或宿主矩形没变。
+
+默认的 `AutomaticDesktopSize` 根据内容区物理像素和本机 DPI 计算 `RdpDisplaySettings`，初次连接即使用该尺寸；联机变化通过 300 毫秒合并的 `UpdateSessionDisplaySettings` 请求处理，不触发设置重连。日志区分请求接受和 `OnRemoteDesktopSizeChange` 确认；界面始终按回报的实际尺寸显示，拒绝或两秒内未确认时提示一次。不会因为尺寸更新失败自动断开或注销。接口依据为微软的 [UpdateSessionDisplaySettings](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/mt703457(v=vs.85)) 和 [缩放属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)。
+
+固定分辨率继续使用 `SmartSizing` 控制等比重采样或 1:1 显示。`WindowPlacement` 在物理像素坐标中处理工作区边界，允许其他显示器合法的负坐标。启动先恢复已有位置，再约束整个窗口；`WM_MOVING` 在拖动矩形生效前保留完整标题栏，显示器/DPI 改变与隐藏恢复也会检查位置。全屏由原有逻辑负责，普通窗口约束会跳过全屏。
+
+设计参考 [Cockburn、Karlson、Bederson 的综述](https://www.csse.canterbury.ac.nz/andrew.cockburn/papers/fc.pdf) 对全局视图与细节导航的取舍，以及 [Windows 多显示器定位说明](https://learn.microsoft.com/en-us/windows/win32/gdi/positioning-objects-on-multiple-display-monitors)。适应窗口默认和合并等待是本项目的实现选择。
+
+布局测试覆盖半屏、宽屏、自定义比例、负坐标恢复、缩入工作区、DPI 换算、拖动约束、隐藏恢复和未连接 ActiveX 的实际 HWND 边界；已连接 Child Session 的动态分辨率协商、渲染与游戏鼠标仍需单独验证。
 
 ## 连接
 
@@ -53,6 +68,16 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 取消是协作式的。已经进入系统或外部 COM 的调用不一定能被 token 中止；代码不会把“调用方不再等待”当成“底层操作已经结束”。退出时仍尽力请求注销子会话。
 
 ## 后台工作与状态
+
+游戏鼠标的手势与按钮在 `WindowsFormsHost` 的 `IMessageFilter` 阶段观察，范围限定为 RDP 原生窗口及其子窗口。ActiveX 的预处理可能先于选中输入 HWND 的窗口过程处理消息，因此仅给该 HWND 加窗口过程监听不足以覆盖点击；释放后过滤器仍保留，断开和替换窗口时移除。该顺序见 [WPF/WinForms 消息互操作](https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/windows-forms-and-wpf-interoperability-input-architecture)。
+
+游戏相对输入由 `RelativeInputController` 持有：前台、控制模式、画面内指针和远端隐藏光标共同决定捕获。捕获期间对子窗口原生输入进行替换，只发送 Raw Input 位移；普通坐标继续由 RDP 处理。Raw Input 的注册仅有一个进程内所有者，退出捕获时有条件恢复原注册；失焦释放自己的 ClipCursor，不覆盖其他应用取得的限制。
+
+`RelativeInputSession` 持有一个当前用户、同提升级别的管道，核对接收端 PID、路径、用户和会话。接收端为嵌入的 Framework 小程序，通过既有临时任务/启动代理进入会话；先查验任务删除再创建接收端。无窗口创建回执只证明进程创建，随后必须完成接收端自己的握手。启动确认期间发送未授权心跳，避免首次确认延迟耗尽活动输入租约。主 UI 的授权 250ms 过期；接收端活动心跳 1500ms 超时即关闭并释放输入。队列有界，仅合并相邻移动，按钮和按键保持顺序，过载断开而不静默丢弃释放。
+
+此通道不创建自启项、不安装驱动，也没有任意程序或脚本命令。`InputLease` 在撤销、断线与退出时释放已注入的键/按钮；菜单释放指针按钮而保留诊断端按住的 Alt。API 测试的位移和键可进入同一会话内通道；硬件捕获仍须额外实测。实现参考 [RDPRelativeInput](https://github.com/TKMAX777/RDPRelativeInput)、[Moonlight](https://github.com/moonlight-stream/moonlight-qt/tree/master/app/streaming/input) 与 [GamingAnywhere 5.1.5](https://chuang.zoolab.org/pubs/pdf/2013mmsys.pdf)，以 C# 独立实现；没有引入其二进制或驱动。
+
+显式传入 `--control-pipe` 时，`App` 持有本地测试桥接并在关闭时取消它。`Diagnostics.LocalControlBridge` 只负责当前用户 ACL、请求边界与协议；`View.DesktopControlTarget` 在 Dispatcher 上调用既有命令、读取状态和核对前台/输入焦点，`Interop.DiagnosticInput` 提供有限的原生输入。普通启动没有监听器。协议与实际验证边界见[本地交互测试桥接](local-control.md)。
 
 - 状态采样仍为 UI 上每 500ms 一次；只在发布快照变化时触发 `StateChanged`。
 - 诊断在打开、激活、手动重检和后台完整性校验完成时采集；采集在后台，界面只渲染快照。没有每两秒完整重扫。

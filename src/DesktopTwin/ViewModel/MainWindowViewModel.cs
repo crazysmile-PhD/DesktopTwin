@@ -24,7 +24,7 @@ namespace DesktopTwin.ViewModel;
 public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const double DefaultWindowWidth = 1280d;
-    private const double SmallWindowWidth = 500d;
+    private const double SmallWindowWidth = 750d;
 
     private readonly ChildSessionService _childSessionService;
     private readonly SettingsService _settings;
@@ -67,9 +67,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private bool _isAdaptive = true;
-
-    [ObservableProperty]
-    private bool _keepAspectRatio = true;
 
     [ObservableProperty]
     private WindowPosition? _normalWindowPosition;
@@ -148,7 +145,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _isTopmost = childSessionService.TopmostEnabled;
         _isAdaptive = childSessionService.SmartSizingEnabled;
-        _keepAspectRatio = childSessionService.KeepAspectRatio;
         _normalWindowPosition = childSessionService.NormalWindowPosition;
         _smallWindowPosition = childSessionService.SmallWindowPosition;
         _sendSystemShortcutsToRemote = childSessionService.SendSystemShortcutsToRemote;
@@ -231,35 +227,35 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 当前分辨率是否为 1920 × 1080。
     /// </summary>
     public bool IsDefaultResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 1920
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 1920
         && _settings.Current.Session.DesktopHeight == 1080;
 
     /// <summary>
     /// 当前分辨率是否为 2560 × 1440。
     /// </summary>
     public bool IsQuadHdResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 2560
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 2560
         && _settings.Current.Session.DesktopHeight == 1440;
 
     /// <summary>
     /// 当前分辨率是否为 1600 × 900。
     /// </summary>
     public bool IsHdPlusResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 1600
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 1600
         && _settings.Current.Session.DesktopHeight == 900;
 
     /// <summary>
     /// 当前分辨率是否为 1280 × 720。
     /// </summary>
     public bool IsHdResolutionSelected =>
-        _settings.Current.Session.DesktopWidth == 1280
+        IsFixedResolution && _settings.Current.Session.DesktopWidth == 1280
         && _settings.Current.Session.DesktopHeight == 720;
 
     /// <summary>
     /// 当前分辨率不在预设列表里，也就是用户自定义的尺寸。
     /// </summary>
     public bool IsCustomResolutionSelected =>
-        !IsDefaultResolutionSelected
+        IsFixedResolution && !IsDefaultResolutionSelected
         && !IsQuadHdResolutionSelected
         && !IsHdPlusResolutionSelected
         && !IsHdResolutionSelected;
@@ -267,20 +263,26 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <summary>
     /// 当前分辨率的显示文本，形如 <c>1920 × 1080</c>。
     /// </summary>
-    public string CurrentResolutionText =>
-        $"{_settings.Current.Session.DesktopWidth} × {_settings.Current.Session.DesktopHeight}";
+    public string CurrentResolutionText => IsAutomaticResolution
+        ? Locale.Get("Menu.Resolution.Automatic")
+        : $"{_settings.Current.Session.DesktopWidth} × {_settings.Current.Session.DesktopHeight}";
+
+    /// <summary>是否按窗口空间调整分身桌面。</summary>
+    public bool IsAutomaticResolution => _settings.Current.Session.AutomaticDesktopSize;
+
+    /// <summary>是否选用了固定分辨率。</summary>
+    public bool IsFixedResolution => !IsAutomaticResolution;
 
     /// <summary>
-    /// 分身桌面的宽高比。窗口锁定与全屏黑边都按它算——DesktopTwin 的分辨率可配，
-    /// 用户设成 1920×1200 时窗口就该锁 16:10，不能沿用固定的 16:9。
+    /// 分身桌面的宽高比。画面布局与小窗尺寸都按设定分辨率计算。
     /// </summary>
     public double DesktopAspectRatio
     {
         get
         {
-            var session = _settings.Current.Session;
-            return session.DesktopHeight > 0
-                ? (double)session.DesktopWidth / session.DesktopHeight
+            var size = _childSessionService.RenderedDesktopSize;
+            return size.Height > 0
+                ? (double)size.Width / size.Height
                 : 16d / 9d;
         }
     }
@@ -1030,6 +1032,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void NotifyResolutionChanged()
     {
+        OnPropertyChanged(nameof(IsAutomaticResolution));
+        OnPropertyChanged(nameof(IsFixedResolution));
         OnPropertyChanged(nameof(IsDefaultResolutionSelected));
         OnPropertyChanged(nameof(IsQuadHdResolutionSelected));
         OnPropertyChanged(nameof(IsHdPlusResolutionSelected));
@@ -1038,6 +1042,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CurrentResolutionText));
         OnPropertyChanged(nameof(DesktopAspectRatio));
     }
+
+    [RelayCommand]
+    private void UseAutomaticResolution()
+    {
+        if (Execute(_childSessionService.UseAutomaticDesktopSize)) NotifyResolutionChanged();
+    }
+
+    /// <summary>原生控件拒绝联机尺寸更新时给出可操作的提示。</summary>
+    internal void NotifyAutomaticResolutionUnavailable() => ShowNotification(
+        Locale.Get("Notify.AutomaticResolution.Title"), Locale.Get("Notify.AutomaticResolution.Message"),
+        InfoBarSeverity.Warning, TimeSpan.FromSeconds(12));
 
     [RelayCommand]
     private void UseAdaptive()
@@ -1059,17 +1074,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         IsSmallWindowMode = !IsSmallWindowMode;
         SmallWindowResizeRequest++;
-    }
-
-    [RelayCommand]
-    private void ToggleKeepAspectRatio()
-    {
-        if (!Execute(() => _childSessionService.SetKeepAspectRatio(!KeepAspectRatio)))
-        {
-            return;
-        }
-
-        KeepAspectRatio = _childSessionService.KeepAspectRatio;
     }
 
     [RelayCommand(CanExecute = nameof(CanToggleSendSystemShortcutsToRemote))]
@@ -1496,6 +1500,13 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             }));
     }
 
+    internal void NotifyRelativeInputFailure(string error) => ShowNotification(
+        Locale.Get("Menu.RelativeMouseMode"), Locale.Format("Notify.RelativeMouse.ChannelFailed", error),
+        InfoBarSeverity.Warning, TimeSpan.FromSeconds(8));
+
+    internal void NotifyRelativeInputReady() => ShowNotification(Locale.Get("Menu.RelativeMouseMode"),
+        Locale.Get("Notify.RelativeMouse.Requested"), InfoBarSeverity.Informational, TimeSpan.FromSeconds(8));
+
     private void ShowNotification(
         string title,
         string message,
@@ -1531,7 +1542,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         var childSessionId = _childSessionService.ChildSessionId;
         IsTopmost = _childSessionService.TopmostEnabled;
         IsAdaptive = _childSessionService.SmartSizingEnabled;
-        KeepAspectRatio = _childSessionService.KeepAspectRatio;
         SendSystemShortcutsToRemote = _childSessionService.SendSystemShortcutsToRemote;
         IsWatchModeEnabled = _childSessionService.WatchModeEnabled;
         IsAudioMuted = _childSessionService.AudioMuted;

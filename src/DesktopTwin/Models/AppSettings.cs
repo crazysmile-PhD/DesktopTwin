@@ -11,7 +11,7 @@ public sealed record AppSettings
     /// <summary>
     /// 当前设置文件的结构版本。新增需要迁移的默认值变更时递增。
     /// </summary>
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     /// <summary>
     /// 设置文件写入时的结构版本。旧文件里没有这一项，反序列化后为 0。
@@ -98,17 +98,12 @@ public sealed record SessionSettings
     public int DesktopHeight { get; init; } = 1080;
 
     /// <summary>
-    /// RDP 画面是否自适应窗口。关闭时按 1:1 像素显示。
-    ///
-    /// 默认关闭（1:1）：分身桌面通常是 1920×1080，而窗口大小取决于屏幕与用户拖动，
-    /// 自适应缩放会把画面重采样，文字发虚。1:1 是清晰的那一档，需要铺满时再手动切。
+    /// 固定分辨率时是否等比缩放完整画面。关闭时按 1:1 像素显示。
     /// </summary>
-    public bool SmartSizing { get; init; }
+    public bool SmartSizing { get; init; } = true;
 
-    /// <summary>
-    /// 拖动窗口边缘时是否保持 16:9 宽高比。
-    /// </summary>
-    public bool KeepAspectRatio { get; init; } = true;
+    /// <summary>默认按窗口可用区域调整远端桌面分辨率，避免将高分辨率桌面缩成缩略图。</summary>
+    public bool AutomaticDesktopSize { get; init; } = true;
 
     /// <summary>
     /// Alt+Tab、Windows 键等系统组合键是否发送到分身。切换需重连 RDP。
@@ -121,7 +116,7 @@ public sealed record SessionSettings
     public bool AudioMuted { get; init; }
 
     /// <summary>
-    /// 实验性原生相对鼠标，默认关闭。切换需重连；要求支持该能力的 RDP 控件和服务器。
+    /// 实验性会话内游戏鼠标，默认关闭。切换需重连；捕获与输入接收端随连接存活。
     /// </summary>
     public bool RelativeMouseMode { get; init; }
 

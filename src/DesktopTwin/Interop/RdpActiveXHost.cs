@@ -40,6 +40,10 @@ internal sealed class RdpActiveXHost : AxHost
 
     /// <summary>最近一次连接配置时请求的值，与排队等待下次连接的期望值分开。</summary>
     internal bool RelativeMouseModeConfiguredEnabled { get; private set; }
+    /// <summary>控件最近报告的输入模式，尚未收到回调时为 null；与属性回读分开记录。</summary>
+    internal bool? ReportedRelativeMouseMode { get; private set; }
+    internal bool? RelativeMouseModeAfterLogin { get; private set; }
+    internal bool LoginComplete => _displayReady;
 
     /// <summary>
     /// 待重连的代际号。取消（DisconnectSession / ResetDisconnectState）时自增，
@@ -49,6 +53,12 @@ internal sealed class RdpActiveXHost : AxHost
     private int _reconnectGeneration;
     private DrawingSize? _pendingReconnectDesktopSize;
     private bool _smartSizingEnabled = true;
+    private bool _displayReady;
+    private RdpDisplaySettings? _lastDisplayRequest;
+    internal DrawingSize? ReportedDesktopSize { get; private set; }
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal uint DesktopScaleFactor { get; set; } = 100;
+    internal event EventHandler? DesktopSizeChanged;
     private readonly RdpSmartSizingController _smartSizing;
     private bool _inputBlocked;
     private Func<(string UserName, string Domain, string Password)?>? _credentialProvider;
@@ -105,6 +115,11 @@ internal sealed class RdpActiveXHost : AxHost
 
         ChildSessionNativeMethods.ClearRdpInputWindowCache(Handle);
         var client = GetRequiredOcx();
+        _displayReady = false;
+        _lastDisplayRequest = null;
+        ReportedDesktopSize = null;
+        ReportedRelativeMouseMode = null;
+        RelativeMouseModeAfterLogin = null;
         var width = Math.Clamp(desktopSize.Width, 200, 8192);
         var height = Math.Clamp(desktopSize.Height, 200, 8192);
 
@@ -164,6 +179,8 @@ internal sealed class RdpActiveXHost : AxHost
         {
             var extendedSettings = (IMsRdpExtendedSettings)client;
             TrySetExtendedProperty(extendedSettings, "EnableZoom", true);
+            TrySetExtendedProperty(extendedSettings, nameof(DesktopScaleFactor), DesktopScaleFactor);
+            TrySetExtendedProperty(extendedSettings, "DeviceScaleFactor", (uint)100);
             var accepted = RdpLocalGraphicsOptions.Apply((name, enabled) =>
             {
                 object value = enabled;
@@ -243,10 +260,35 @@ internal sealed class RdpActiveXHost : AxHost
 
     private void ApplySmartSizing(bool enabled)
     {
-        var advancedSettings = GetComProperty(GetRequiredOcx(), "AdvancedSettings7")
-            ?? throw new COMException(Locale.Get("Rdp.Error.AdvancedSettings"));
+        var advancedSettings = GetAdvancedSettings();
         RunComStep(Locale.Get("Rdp.Step.DisplayScale"), () =>
             SetComProperty(advancedSettings, "SmartSizing", enabled));
+    }
+
+    private object GetAdvancedSettings() => GetComProperty(GetRequiredOcx(), "AdvancedSettings7")
+        ?? throw new COMException(Locale.Get("Rdp.Error.AdvancedSettings"));
+
+    /// <summary>联机更新分辨率，不断开会话；返回成功只代表请求被接受。</summary>
+    internal bool UpdateDesktopDisplay(RdpDisplaySettings settings)
+    {
+        if (!_displayReady || ConnectedState != 1) return true;
+        if (_lastDisplayRequest == settings) return true;
+        _lastDisplayRequest = settings;
+        try
+        {
+            InvokeComMethod(GetRequiredOcx(), "UpdateSessionDisplaySettings",
+                (uint)settings.DesktopSize.Width, (uint)settings.DesktopSize.Height,
+                settings.PhysicalWidth, settings.PhysicalHeight, (uint)0, settings.ScaleFactor, (uint)100);
+            AppLog.Info($"已请求窗口桌面尺寸 {settings.DesktopSize.Width}×{settings.DesktopSize.Height}，"
+                + $"DPI={settings.ScaleFactor}%；实际尺寸等待 RDP 回调确认。");
+            return true;
+        }
+        catch (Exception error) when (error is COMException or MissingMemberException
+            || error is TargetInvocationException { InnerException: COMException })
+        {
+            AppLog.Warn("RDP 未接受窗口分辨率更新，保留当前桌面与等比显示，不自动重连。", error);
+            return false;
+        }
     }
 
     private void RefreshSmartSizing()
@@ -282,7 +324,9 @@ internal sealed class RdpActiveXHost : AxHost
     private void ApplyRelativeMouseMode(object client, object advancedSettings)
     {
         var extendedSettings = (IMsRdpExtendedSettings)client;
-        RelativeMouseModeConfiguredEnabled = _relativeMouseModeEnabled;
+        // The session input channel owns game-relative movement. Keep native RDP input
+        // absolute so desktop/Alt menus retain their normal coordinate mapping.
+        RelativeMouseModeConfiguredEnabled = false;
         RelativeMouseModeSettingsAccepted = RdpRelativeMouseOptions.Apply(
             RelativeMouseModeConfiguredEnabled,
             enabled =>
@@ -291,8 +335,8 @@ internal sealed class RdpActiveXHost : AxHost
                 extendedSettings.set_Property("AllowRelativeMouseMode", ref value);
             },
             enabled => SetComProperty(advancedSettings, "RelativeMouseMode", enabled));
-        AppLog.Info($"相对鼠标：请求={_relativeMouseModeEnabled}，"
-            + $"属性完整接受={RelativeMouseModeSettingsAccepted}。属性接受不代表游戏输入已验证。");
+        AppLog.Info($"游戏鼠标通道请求={_relativeMouseModeEnabled}；原生 RDP 保持绝对模式，"
+            + $"复位属性接受={RelativeMouseModeSettingsAccepted}。");
     }
 
     /// <summary>
@@ -532,14 +576,43 @@ internal sealed class RdpActiveXHost : AxHost
 
     private void OnLoginComplete()
     {
+        _displayReady = true;
+        _lastDisplayRequest = null;
+        if (RelativeMouseModeConfiguredEnabled && RelativeMouseModeSettingsAccepted)
+        {
+            var mode = RdpRelativeMouseOptions.ReapplyAfterLogin(RelativeMouseModeConfiguredEnabled,
+                enabled => SetComProperty(GetAdvancedSettings(), "RelativeMouseMode", enabled),
+                () => Convert.ToBoolean(GetComProperty(GetAdvancedSettings(), "RelativeMouseMode"), CultureInfo.InvariantCulture));
+            RelativeMouseModeAfterLogin = mode;
+            AppLog.Info($"相对鼠标登录后：请求={RelativeMouseModeConfiguredEnabled}，模式读回={mode?.ToString() ?? "未知"}，"
+                + $"模式回调={ReportedRelativeMouseMode?.ToString() ?? "尚未收到"}。游戏转视角仍需实际验证。");
+        }
+        try
+        {
+            var client = GetRequiredOcx();
+            var width = Convert.ToInt32(GetComProperty(client, "DesktopWidth"), CultureInfo.InvariantCulture);
+            var height = Convert.ToInt32(GetComProperty(client, "DesktopHeight"), CultureInfo.InvariantCulture);
+            if (width > 0 && height > 0)
+            {
+                ReportedDesktopSize = new DrawingSize(width, height);
+                DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception error) when (error is COMException
+            || error is TargetInvocationException { InnerException: COMException })
+        {
+            AppLog.Warn("登录后读取远端桌面尺寸失败，等待尺寸回调。", error);
+        }
         _connectionAttemptInProgress = false;
         _connectionFailureReported = false;
         _lastConnectionDiagnostic = null;
         LoginCompleted?.Invoke(this, EventArgs.Empty);
+        _smartSizing.ScheduleRefresh();
     }
 
     private void OnDisconnected(int disconnectReason)
     {
+        _displayReady = false;
         var failedWhileConnecting = _connectionAttemptInProgress;
         _connectionAttemptInProgress = false;
 
@@ -1129,6 +1202,14 @@ internal sealed class RdpActiveXHost : AxHost
 
         public void OnRemoteDesktopSizeChange(int width, int height)
         {
+            if (width <= 0 || height <= 0) return;
+            var size = new DrawingSize(width, height);
+            if (owner.ReportedDesktopSize == size) return;
+            owner.ReportedDesktopSize = size;
+            AppLog.Info($"RDP 确认桌面尺寸 {width}×{height}。");
+            owner.DesktopSizeChanged?.Invoke(owner, EventArgs.Empty);
+            // 分辨率变化不一定改变控件尺寸；相同比例下也要重算原生显示映射。
+            if (owner._displayReady) owner._smartSizing.ScheduleRefresh();
         }
 
         public void OnIdleTimeoutNotification()
@@ -1202,6 +1283,7 @@ internal sealed class RdpActiveXHost : AxHost
 
         public void OnMouseInputModeChanged(bool isRelativeMouseMode)
         {
+            owner.ReportedRelativeMouseMode = isRelativeMouseMode;
             AppLog.Info($"RDP 鼠标输入模式回调：相对模式={isRelativeMouseMode}。");
         }
 

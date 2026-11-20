@@ -19,7 +19,8 @@ public sealed class AppSettingsNormalizerTests
         };
 
         Assert.True(AppSettingsNormalizer.NormalizeAndMigrate(ref settings, "fallback"));
-        Assert.False(settings.Session.SmartSizing);
+        Assert.True(settings.Session.SmartSizing);
+        Assert.True(settings.Session.AutomaticDesktopSize);
         Assert.Equal("new", settings.Automation.AutoLoginPasswords["USER"]);
         Assert.Null(settings.Automation.LegacyAutoLoginPassword);
         Assert.Equal(AppSettings.CurrentVersion, settings.SettingsVersion);

@@ -7,6 +7,51 @@ namespace DesktopTwin.Tests;
 public sealed class RdpRelativeMouseOptionsTests
 {
     [Fact]
+    public void LoginRestoresModeAfterConnectionResetsThePreconnectionValue()
+    {
+        bool allow = false, relative = false;
+        Assert.True(RdpRelativeMouseOptions.Apply(true, value => allow = value, value => relative = value));
+        relative = false; // The connection established a new native input context.
+        var result = RdpRelativeMouseOptions.ReapplyAfterLogin(true, value => relative = value, () => relative);
+        Assert.True(result);
+        Assert.True(allow);
+        Assert.True(relative);
+    }
+
+    [Fact]
+    public void LoginReadbackDoesNotTreatAcceptedWriteAsRelativeInputEvidence()
+    {
+        var result = RdpRelativeMouseOptions.ReapplyAfterLogin(true, _ => { }, () => false);
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void DisabledModeIsAlsoAppliedAfterLogin()
+    {
+        var relative = true;
+        Assert.False(RdpRelativeMouseOptions.ReapplyAfterLogin(false, value => relative = value, () => relative));
+        Assert.False(relative);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnsupportedPostLoginWriteOrReadKeepsTheConnectionUsable(bool failRead)
+    {
+        var result = RdpRelativeMouseOptions.ReapplyAfterLogin(true,
+            _ => { if (!failRead) throw new COMException("write unsupported"); },
+            () => throw new TargetInvocationException(new COMException("read unsupported")));
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void PostLoginDoesNotHideProgrammingErrors()
+    {
+        Assert.Throws<InvalidOperationException>(() => RdpRelativeMouseOptions.ReapplyAfterLogin(true,
+            _ => throw new InvalidOperationException("programming error"), () => true));
+    }
+
+    [Fact]
     public void DisablingOnReusedControlClearsBothPreviouslyEnabledProperties()
     {
         bool allow = false, relative = false;

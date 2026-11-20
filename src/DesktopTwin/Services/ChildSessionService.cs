@@ -101,7 +101,7 @@ public sealed class ChildSessionService : IDisposable
     private long? _environmentCheckedTick;
 
     private readonly record struct SessionViewState(string Text, uint? SessionId, int Connection,
-        bool Visible, bool Topmost, bool SmartSizing, bool AspectRatio, bool Shortcuts,
+        bool Visible, bool Topmost, bool SmartSizing, bool Shortcuts,
         bool Muted, bool WatchMode, bool RelativeMouse, DrawingSize Size);
 
     /// <summary>
@@ -249,11 +249,6 @@ public sealed class ChildSessionService : IDisposable
     public bool SmartSizingEnabled => _settings.Current.Session.SmartSizing;
 
     /// <summary>
-    /// 是否保持宽高比。
-    /// </summary>
-    public bool KeepAspectRatio => _settings.Current.Session.KeepAspectRatio;
-
-    /// <summary>
     /// 分身声音是否关闭。
     /// </summary>
     public bool AudioMuted => _settings.Current.Session.AudioMuted;
@@ -277,9 +272,25 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 分身桌面的逻辑分辨率。
     /// </summary>
-    public DrawingSize DesktopSize => new(
-        _settings.Current.Session.DesktopWidth,
-        _settings.Current.Session.DesktopHeight);
+    public DrawingSize DesktopSize => _settings.Current.Session.AutomaticDesktopSize
+        && _desktopHost.Current?.AvailableDesktopSize is { } available
+        ? available
+        : new(_settings.Current.Session.DesktopWidth, _settings.Current.Session.DesktopHeight);
+
+    /// <summary>实际回报的远端尺寸，尚无回报时使用当前请求尺寸。</summary>
+    public DrawingSize RenderedDesktopSize => _desktopHost.Current?.ReportedDesktopSize ?? DesktopSize;
+
+    /// <summary>启用按窗口调整桌面分辨率，保留固定分辨率供手动切换。</summary>
+    public void UseAutomaticDesktopSize()
+    {
+        ThrowIfDisposed();
+        _settings.Update(s => s with { Session = s.Session with { AutomaticDesktopSize = true, SmartSizing = true } });
+        DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
+        RefreshState(Locale.Get("Svc.Status.AutomaticResolution"));
+    }
+
+    private void OnRdpDesktopSizeChanged(object? sender, EventArgs e) =>
+        DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
 
     /// <summary>
     /// 普通窗口模式的记忆位置。
@@ -352,6 +363,7 @@ public sealed class ChildSessionService : IDisposable
         _desktopHost.VisibilityChanged += OnDesktopWindowVisibilityChanged;
         _desktopHost.ConnectionFailed += OnRdpConnectionFailed;
         _desktopHost.LoginCompleted += OnRdpLoginCompleted;
+        _desktopHost.DesktopSizeChanged += OnRdpDesktopSizeChanged;
         SendSystemShortcutsToRemote = settings.Current.Session.SendSystemShortcutsToRemote;
         _statusTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -692,16 +704,6 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 切换是否保持宽高比。
-    /// </summary>
-    public void SetKeepAspectRatio(bool enabled)
-    {
-        ThrowIfDisposed();
-        _settings.Update(s => s with { Session = s.Session with { KeepAspectRatio = enabled } });
-        RefreshState(enabled ? Locale.Get("Svc.Status.KeepAspect") : Locale.Get("Svc.Status.NoAspect"));
-    }
-
-    /// <summary>
     /// 切换窗口置顶。
     /// </summary>
     public void SetTopmost(bool enabled)
@@ -809,7 +811,10 @@ public sealed class ChildSessionService : IDisposable
                     SessionSettings.MaxDesktopHeight));
         }
 
-        _settings.Update(s => s with { Session = s.Session with { DesktopWidth = width, DesktopHeight = height } });
+        _settings.Update(s => s with
+        {
+            Session = s.Session with { AutomaticDesktopSize = false, DesktopWidth = width, DesktopHeight = height }
+        });
 
         // 分辨率变了，全屏下「1:1 还是自适应」的判定前提也变了，通知界面重新算。
         DesktopSizeChanged?.Invoke(this, EventArgs.Empty);
@@ -998,7 +1003,7 @@ public sealed class ChildSessionService : IDisposable
         }
 
         var state = new SessionViewState(StatusText, ChildSessionId, ConnectedState, IsDesktopVisible,
-            TopmostEnabled, SmartSizingEnabled, KeepAspectRatio, SendSystemShortcutsToRemote,
+            TopmostEnabled, SmartSizingEnabled, SendSystemShortcutsToRemote,
             AudioMuted, WatchModeEnabled, RelativeMouseModeEnabled, DesktopSize);
         if (_publishedState != state)
         {
@@ -1194,6 +1199,7 @@ public sealed class ChildSessionService : IDisposable
             _desktopHost.VisibilityChanged -= OnDesktopWindowVisibilityChanged;
             _desktopHost.ConnectionFailed -= OnRdpConnectionFailed;
             _desktopHost.LoginCompleted -= OnRdpLoginCompleted;
+            _desktopHost.DesktopSizeChanged -= OnRdpDesktopSizeChanged;
             TryDisconnectRdpHost();
         }
 

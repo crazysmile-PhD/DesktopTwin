@@ -29,10 +29,10 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(1920, settings.Session.DesktopWidth);
         Assert.Equal(1080, settings.Session.DesktopHeight);
 
-        // 显示比例默认 1:1（文字最清晰的一档）；自适应缩放需要用户主动选
-        Assert.False(settings.Session.SmartSizing);
+        Assert.True(settings.Session.SmartSizing);
+        Assert.True(settings.Session.AutomaticDesktopSize);
+        Assert.False(settings.Window.SmallWindowMode);
         Assert.False(settings.Session.RelativeMouseMode);
-        Assert.True(settings.Session.KeepAspectRatio);
         Assert.True(settings.Launch.AutoLaunchOnConnect);
 
         // 提权默认关闭：减少与反作弊、账号安全机制的冲突
@@ -50,6 +50,51 @@ public sealed class SettingsServiceTests : IDisposable
 
         // 全屏顶栏默认不固定：只在鼠标到顶端时出现
         Assert.False(settings.Window.FullscreenBarPinned);
+    }
+
+    [Fact]
+    public void 旧版拉伸开关被忽略且保存时移除()
+    {
+        File.WriteAllText(Path.Combine(_directory, "settings.json"),
+            """{"SettingsVersion":1,"Session":{"KeepAspectRatio":false,"DesktopWidth":1600,"DesktopHeight":1000,"SmartSizing":true}}""");
+
+        using var service = new SettingsService(_directory);
+        Assert.Equal(1600, service.Current.Session.DesktopWidth);
+        Assert.Equal(1000, service.Current.Session.DesktopHeight);
+        Assert.True(service.Current.Session.SmartSizing);
+        service.Flush();
+        using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(service.SettingsPath));
+        Assert.False(document.RootElement.GetProperty("Session").TryGetProperty("KeepAspectRatio", out _));
+    }
+
+    [Fact]
+    public void 升级时恢复可读的自动分辨率且不再自动进入旧小窗()
+    {
+        File.WriteAllText(Path.Combine(_directory, "settings.json"),
+            """{"SettingsVersion":1,"Session":{"SmartSizing":false},"Window":{"SmallWindowMode":true,"SmallPosition":{"Left":581,"Top":-59}}}""");
+        using var service = new SettingsService(_directory);
+        Assert.True(service.Current.Session.AutomaticDesktopSize);
+        Assert.True(service.Current.Session.SmartSizing);
+        Assert.False(service.Current.Window.SmallWindowMode);
+        Assert.Equal(2, service.Current.SettingsVersion);
+    }
+
+    [Fact]
+    public void 新版显式选择固定分辨率与小窗在下次启动仍被保留()
+    {
+        using (var service = new SettingsService(_directory))
+        {
+            service.Update(s => s with
+            {
+                Session = s.Session with { AutomaticDesktopSize = false, SmartSizing = false },
+                Window = s.Window with { SmallWindowMode = true }
+            });
+            service.Flush();
+        }
+        using var reader = new SettingsService(_directory);
+        Assert.False(reader.Current.Session.AutomaticDesktopSize);
+        Assert.False(reader.Current.Session.SmartSizing);
+        Assert.True(reader.Current.Window.SmallWindowMode);
     }
 
     [Fact]

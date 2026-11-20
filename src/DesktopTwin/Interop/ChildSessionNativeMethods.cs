@@ -386,6 +386,8 @@ internal static class ChildSessionNativeMethods
         return GetFocus() == inputWindow;
     }
 
+    internal static IntPtr GetRdpInputWindow(IntPtr rdpHostWindow) => FindRdpInputWindow(rdpHostWindow, out _);
+
     internal static bool IsRdpInputWindowFocused(IntPtr rdpHostWindow)
     {
         var inputWindow = FindRdpInputWindow(rdpHostWindow, out _);

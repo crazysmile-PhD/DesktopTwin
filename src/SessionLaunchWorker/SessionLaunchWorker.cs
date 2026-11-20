@@ -34,7 +34,7 @@ namespace DesktopTwinSessionLaunchWorker
                         if (reader.ReadInt32() != SessionLaunchProtocol.Version)
                             throw new IOException("Unsupported launch protocol.");
                         return new Request(reader.ReadString(), reader.ReadString(), reader.ReadString(),
-                            reader.ReadInt32(), reader.ReadInt32());
+                            reader.ReadInt32(), reader.ReadInt32(), reader.ReadBoolean());
                     });
                     if (!request.Wait(SessionLaunchProtocol.ConnectionMilliseconds)) return 3;
                     var value = request.Result;
@@ -55,9 +55,10 @@ namespace DesktopTwinSessionLaunchWorker
             internal readonly string Path, Arguments, Directory;
             internal readonly int SessionId;
             internal readonly int ObservationMilliseconds;
-            internal Request(string path, string arguments, string directory, int sessionId, int milliseconds)
+            internal readonly bool RequireWindow;
+            internal Request(string path, string arguments, string directory, int sessionId, int milliseconds, bool requireWindow)
             { Path = path; Arguments = arguments; Directory = directory; SessionId = sessionId;
-                ObservationMilliseconds = milliseconds; }
+                ObservationMilliseconds = milliseconds; RequireWindow = requireWindow; }
         }
 
         private static int Launch(Request request, BinaryWriter writer, Task disconnected)
@@ -74,9 +75,18 @@ namespace DesktopTwinSessionLaunchWorker
                 target = Process.Start(info);
                 if (target == null) throw new InvalidOperationException("未取得目标进程。");
                 pid = target.Id;
-                started = target.StartTime.ToUniversalTime().Ticks;
+                started = ProcessCreationIdentity.Read(pid);
                 if (target.SessionId != request.SessionId)
                     throw new InvalidOperationException("目标进程不在请求的会话中。");
+
+                // A bundled headless companion confirms readiness over its own authenticated
+                // channel. This receipt confirms creation/identity only, never input readiness.
+                if (!request.RequireWindow)
+                {
+                    SessionLaunchProtocol.WriteResult(writer, true, pid, request.SessionId,
+                        started, 0, string.Empty);
+                    return 0;
+                }
 
                 var clock = Stopwatch.StartNew();
                 while (clock.ElapsedMilliseconds < request.ObservationMilliseconds)

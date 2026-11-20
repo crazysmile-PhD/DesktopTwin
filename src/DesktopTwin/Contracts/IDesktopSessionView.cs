@@ -8,8 +8,11 @@ namespace DesktopTwin.Contracts;
 internal interface IDesktopSessionView
 {
     bool IsVisible { get; }
+    Size? AvailableDesktopSize { get; }
+    Size? ReportedDesktopSize { get; }
     IRdpSessionClient RdpHost { get; }
     event EventHandler? VisibilityChanged;
+    event EventHandler? DesktopSizeChanged;
     void ShowAndActivate();
     void Hide();
     void Close();
