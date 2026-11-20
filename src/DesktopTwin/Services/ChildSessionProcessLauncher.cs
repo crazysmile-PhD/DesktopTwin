@@ -88,8 +88,7 @@ public static class ChildSessionProcessLauncher
         var workingDirectory = Path.GetDirectoryName(fullPath) ?? AppContext.BaseDirectory;
         return TrackLaunch(token => LaunchWithTemporaryTaskAsync(
             childSessionId, fullPath, arguments ?? string.Empty, workingDirectory,
-            runAsAdministrator, agent: false, TaskNamePrefix, token,
-            ChildSessionNativeMethods.TryGetChildSessionId), cancellationToken);
+            runAsAdministrator, agent: false, TaskNamePrefix, ChildSessionNativeMethods.TryGetChildSessionId, token), cancellationToken);
     }
 
     private static Task TrackLaunch(Func<CancellationToken, Task> launch, CancellationToken token)
@@ -101,7 +100,7 @@ public static class ChildSessionProcessLauncher
             var task = Task.Run(async () =>
             {
                 using (linked) await launch(linked.Token).ConfigureAwait(false);
-            });
+            }, CancellationToken.None); // Always enter the delegate to dispose the linked source and run cleanup.
             ActiveLaunches.Add(task);
             _ = task.ContinueWith(completed =>
             {
@@ -452,8 +451,7 @@ public static class ChildSessionProcessLauncher
         {
             var path = ValidateExecutablePath(executablePath);
             await TrackLaunch(token => LaunchWithTemporaryTaskAsync(sessionId, path, arguments,
-                Path.GetDirectoryName(path) ?? string.Empty, false, true, taskNamePrefix, token,
-                ChildSessionNativeMethods.TryGetChildSessionId),
+                Path.GetDirectoryName(path) ?? string.Empty, false, true, taskNamePrefix, ChildSessionNativeMethods.TryGetChildSessionId, token),
                 cancellationToken).ConfigureAwait(false);
             return true;
         }
@@ -468,7 +466,7 @@ public static class ChildSessionProcessLauncher
 
     internal static async Task LaunchWithTemporaryTaskAsync(uint childSessionId, string executablePath,
         string arguments, string workingDirectory, bool runAsAdministrator, bool agent,
-        string taskNamePrefix, CancellationToken cancellationToken, Func<uint?> getSessionId)
+        string taskNamePrefix, Func<uint?> getSessionId, CancellationToken cancellationToken)
     {
         void ValidateSession()
         {

@@ -15,8 +15,12 @@
 | `ChildSessionProcessLauncher` / `SessionLaunchWorker` | 临时任务只引导独立启动代理进入指定会话；清理后授权启动并核对回执 |
 | `ChildSessionEnvironmentCheck` / `EnvironmentFixer` | 诊断采集与显式系统修复 |
 | `AsyncSnapshotRefresh<T>` | 合并界面的异步采集请求，丢弃过期/关闭后的结果 |
+| `AppSettingsNormalizer` | 无 IO 的设置修复与版本迁移；SettingsService 负责存储和延迟写入 |
+| `DiagnosticIssueHistory` | 独立维护诊断历史与已解决证据；DiagnosticsWindow 负责渲染 |
 
 会话服务直接持有窗口；这不是严格单向依赖架构。它同时保留服务层和控件层重试，仍有继续收敛的空间。
+
+架构测试阻止新增服务依赖具体窗口，并保持 Models 与诊断历史不依赖 UI/原生操作。ViewModel 通过幂等 `Dispose` 释放资源；WPF 窗口在关闭时调用。度量门槛和剩余拆分方向见 [质量门禁](quality-gates.md)。
 
 ## 连接
 

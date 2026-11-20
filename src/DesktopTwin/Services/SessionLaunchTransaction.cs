@@ -12,7 +12,6 @@ internal static class SessionLaunchTransaction
         Func<Task> deleteAndVerify, Func<Task> launchAndConfirm, CancellationToken cancellationToken)
     {
         var deleted = false;
-        Exception? operationError = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -24,8 +23,7 @@ internal static class SessionLaunchTransaction
             cancellationToken.ThrowIfCancellationRequested();
             await launchAndConfirm().ConfigureAwait(false);
         }
-        catch (Exception error) { operationError = error; throw; }
-        finally
+        catch (Exception operationError)
         {
             if (!deleted)
             {
@@ -33,9 +31,10 @@ internal static class SessionLaunchTransaction
                 catch (Exception cleanupError)
                 {
                     throw new InvalidOperationException("临时启动任务清理未完成；目标启动未获授权。",
-                        operationError is null ? cleanupError : new AggregateException(operationError, cleanupError));
+                        new AggregateException(operationError, cleanupError));
                 }
             }
+            throw;
         }
     }
 }

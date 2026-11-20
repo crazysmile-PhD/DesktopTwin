@@ -1,13 +1,14 @@
-using System;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
+using System.Threading;
 using System.Windows.Threading;
+using System.Windows;
+using System;
 using DesktopTwin.Interop;
 using DesktopTwin.Models;
 using DesktopTwin.View;
@@ -728,19 +729,19 @@ public sealed class ChildSessionService : IDisposable
         // 同上：这里的每一步都是窗口/RDP 控件操作。
         if (_dispatcher.CheckAccess())
         {
-            return EnsureDesktopConnectedCoreAsync(cancellationToken, showWindow, existingSessionGeneration);
+            return EnsureDesktopConnectedCoreAsync(showWindow, existingSessionGeneration, cancellationToken);
         }
 
         return _dispatcher
-            .InvokeAsync(() => EnsureDesktopConnectedCoreAsync(cancellationToken, showWindow, existingSessionGeneration))
+            .InvokeAsync(() => EnsureDesktopConnectedCoreAsync(showWindow, existingSessionGeneration, cancellationToken))
             .Task
             .Unwrap();
     }
 
     private async Task<bool> EnsureDesktopConnectedCoreAsync(
-        CancellationToken cancellationToken,
         bool showWindow,
-        int? existingSessionGeneration)
+        int? existingSessionGeneration,
+        CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
 
@@ -768,9 +769,7 @@ public sealed class ChildSessionService : IDisposable
             ShowDesktopWindow(window);
         }
 
-        if (!connectionPending && (window.RdpHost.ConnectedState != 1
-            || ChildSessionNativeMethods.TryGetChildSessionId() is not { } connectedSession
-            || !ChildSessionNativeMethods.IsSessionActive(connectedSession)))
+        if (!connectionPending && !IsDesktopSessionActive(window.RdpHost))
         {
             if (ChildSessionNativeMethods.TryGetChildSessionId() is null)
             {
@@ -799,9 +798,7 @@ public sealed class ChildSessionService : IDisposable
                 return false;
             }
 
-            if (window.RdpHost.ConnectedState == 1
-                && ChildSessionNativeMethods.TryGetChildSessionId() is { } id
-                && ChildSessionNativeMethods.IsSessionActive(id))
+            if (IsDesktopSessionActive(window.RdpHost))
             {
                 return true;
             }
@@ -809,11 +806,13 @@ public sealed class ChildSessionService : IDisposable
             await Task.Delay(400, cancellationToken).ConfigureAwait(true);
         }
 
-        return window.RdpHost.ConnectedState == 1
-            && operationGeneration == StartGeneration
-            && ChildSessionNativeMethods.TryGetChildSessionId() is { } finalId
-            && ChildSessionNativeMethods.IsSessionActive(finalId);
+        return operationGeneration == StartGeneration && IsDesktopSessionActive(window.RdpHost);
     }
+
+    private static bool IsDesktopSessionActive(RdpActiveXHost host) =>
+        host.ConnectedState == 1
+        && ChildSessionNativeMethods.TryGetChildSessionId() is { } id
+        && ChildSessionNativeMethods.IsSessionActive(id);
 
     /// <summary>
     /// 向分身发送 Win+D 显示桌面。
@@ -1162,7 +1161,7 @@ public sealed class ChildSessionService : IDisposable
                 2 => Locale.Get("Svc.Conn.Connecting"),
                 _ => Locale.Format("Svc.Conn.Unknown", ConnectedState)
             };
-            var sessionText = ChildSessionId?.ToString() ?? Locale.Get("Check.None");
+            var sessionText = ChildSessionId?.ToString(CultureInfo.InvariantCulture) ?? Locale.Get("Check.None");
             var mainText = _lastOperationMessage ?? connectionText;
             var enabledText = enabled ? Locale.Get("Svc.Status.On") : Locale.Get("Svc.Status.Off");
 
@@ -1617,7 +1616,7 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 取当前分身会话 ID；没有可用会话时抛出 <see cref="InvalidOperationException"/>。
     /// </summary>
-    private uint GetRequiredChildSessionId()
+    private static uint GetRequiredChildSessionId()
     {
         var childSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
         if (childSessionId is null)
@@ -1628,7 +1627,7 @@ public sealed class ChildSessionService : IDisposable
         return childSessionId.Value;
     }
 
-    private void EnsureChildSessionsEnabled()
+    private static void EnsureChildSessionsEnabled()
     {
         if (!ChildSessionNativeMethods.IsChildSessionsEnabled())
         {

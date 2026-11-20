@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -26,6 +26,7 @@ namespace DesktopTwin.View;
 ///
     /// 非模态；打开、重新激活、手动重检与完整性校验完成时后台刷新。
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "The Closed handler disposes the refresh operation and removes event subscriptions.")]
 internal sealed class DiagnosticsWindow : FluentWindow
 {
     private static readonly Color WarningColor = Color.FromRgb(0xFF, 0xC8, 0x3D);
@@ -55,14 +56,7 @@ internal sealed class DiagnosticsWindow : FluentWindow
     private readonly AsyncSnapshotRefresh<DiagnosticSnapshot> _refresh;
     private bool _invalidateScan;
 
-    /// <summary>出现过的所有问题标识，用于判断「曾经有问题、现在没了」。</summary>
-    private readonly HashSet<string> _seen = new(StringComparer.Ordinal);
-
-    /// <summary>已经解决（当前检测不到）的问题标识。</summary>
-    private readonly HashSet<string> _resolved = new(StringComparer.Ordinal);
-
-    /// <summary>问题标题快照，解决后仍然能显示原来的标题。</summary>
-    private readonly Dictionary<string, string> _titles = new(StringComparer.Ordinal);
+    private readonly DiagnosticIssueHistory _history = new();
 
     /// <summary>当前处于展开状态的行（按问题标识）。刷新重建时按它恢复。</summary>
     private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
@@ -204,7 +198,7 @@ internal sealed class DiagnosticsWindow : FluentWindow
     /// </summary>
     internal event EventHandler? PasswordSetupRequested;
 
-    private UIElement BuildLayout()
+    private Grid BuildLayout()
     {
         var root = new Grid { Margin = new Thickness(20, 16, 20, 16) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -262,7 +256,7 @@ internal sealed class DiagnosticsWindow : FluentWindow
         return root;
     }
 
-    private UIElement BuildFooter()
+    private Grid BuildFooter()
     {
         var footer = new Grid { Margin = new Thickness(0, 12, 0, 0) };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -380,51 +374,8 @@ internal sealed class DiagnosticsWindow : FluentWindow
         if (_closed || _fixInProgress) return;
         var issues = snapshot.Issues;
 
-        var currentIds = new HashSet<string>(StringComparer.Ordinal);
-
-        // 留一份给「反馈问题」：标题直接带上当前最主要的问题，省得用户再描述一遍。
         _lastIssues = issues;
-
-        foreach (var issue in issues)
-        {
-            if (issue.IssueSeverity == ChildSessionEnvironmentCheck.Severity.Inactive)
-            {
-                // 未触发项不参与「已解决」判断，否则一切正常时它们会全被记成已解决过。
-                continue;
-            }
-
-            currentIds.Add(issue.Id);
-            _titles[issue.Id] = issue.Title;
-            _seen.Add(issue.Id);
-
-            // 又出现了，说明之前的「已解决」判断作废。
-            _resolved.Remove(issue.Id);
-        }
-
-        // 校验还没出结论时，termsrv 那一条会暂时不出现：这时不能把它记成「已解决」，
-        // 否则界面会先打勾、几秒后又变回问题。
-        var termsrvPending = snapshot.TermsrvPending;
-        var termsrvConclusive = snapshot.TermsrvConclusive;
-        foreach (var id in _seen)
-        {
-            if (currentIds.Contains(id))
-            {
-                continue;
-            }
-
-            // 未出结论（校验中、没提权、sfc 跑不起来）都不算「已解决」：
-            // 只有确认文件完好才允许打勾，否则会先打勾、下次又变回问题。
-            if ((termsrvPending || !termsrvConclusive)
-                && string.Equals(id, "termsrv-dll-tampered", StringComparison.Ordinal))
-            {
-                // 只跳过「加入」不够：上一轮确认修好后它已经在集合里，这轮重检又变成
-                // 「未验证」，旧的绿勾会一直挂着，直到新结论出来。先摘掉。
-                _resolved.Remove(id);
-                continue;
-            }
-
-            _resolved.Add(id);
-        }
+        _history.Update(issues, snapshot.TermsrvConclusive && !snapshot.TermsrvPending);
 
         var warningCount = 0;
         var noticeCount = 0;
@@ -493,12 +444,12 @@ internal sealed class DiagnosticsWindow : FluentWindow
             _noticeSection.Children.Add(BuildPlaceholder(Locale.Get("Diag.Empty.Notice")));
         }
 
-        foreach (var id in _resolved)
+        foreach (var id in _history.ResolvedIds)
         {
-            _resolvedSection.Children.Add(BuildResolvedRow(_titles.TryGetValue(id, out var title) ? title : id));
+            _resolvedSection.Children.Add(BuildResolvedRow(_history.GetTitle(id)));
         }
 
-        if (_resolved.Count == 0)
+        if (_history.ResolvedIds.Count == 0)
         {
             _resolvedSection.Children.Add(BuildPlaceholder(Locale.Get("Diag.Empty.Resolved")));
         }
@@ -551,19 +502,19 @@ internal sealed class DiagnosticsWindow : FluentWindow
         }
 
         // 已解决区只显示标题，按标识排序保证顺序稳定。
-        var resolved = new List<string>(_resolved);
+        var resolved = new List<string>(_history.ResolvedIds);
         resolved.Sort(StringComparer.Ordinal);
         foreach (var id in resolved)
         {
             builder.Append('\u0002')
                 .Append(id).Append('|')
-                .Append(_titles.TryGetValue(id, out var title) ? title : id);
+                .Append(_history.GetTitle(id));
         }
 
         return builder.ToString();
     }
 
-    private TextBlock BuildPlaceholder(string text) => new()
+    private static TextBlock BuildPlaceholder(string text) => new()
     {
         Text = text,
         Opacity = 0.5,
@@ -665,7 +616,7 @@ internal sealed class DiagnosticsWindow : FluentWindow
         return border;
     }
 
-    private Border BuildResolvedRow(string title)
+    private static Border BuildResolvedRow(string title)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal };
         panel.Children.Add(new TextBlock

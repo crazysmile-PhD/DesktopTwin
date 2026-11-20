@@ -373,10 +373,7 @@ internal sealed class GlobalHotkeyService : IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(GlobalHotkeyService));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
     [DllImport("user32.dll", SetLastError = true)]

@@ -133,7 +133,7 @@ public sealed class SessionLifecycleTests
         Assert.False((bool)Get(service, "_rdpSettingsReconnectActive"));
         Assert.Equal(0, (int)Get(service, "_rdpSettingsReconnectRetriesRemaining"));
         Assert.Equal(1, (int)Get(service, "_settingsReconnectGeneration"));
-        Assert.Equal(2, Convert.ToInt32(Get(service, "_pendingRdpSettingChanges")));
+        Assert.Equal(2, Convert.ToInt32(Get(service, "_pendingRdpSettingChanges"), System.Globalization.CultureInfo.InvariantCulture));
         Assert.False((bool)Invoke(service, "ExpireSettingsReconnect"));
     }
 

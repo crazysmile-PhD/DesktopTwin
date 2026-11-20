@@ -2,9 +2,10 @@
 
 ## 构建与检查
 
-在 Windows 上安装 .NET SDK 10 或更新的兼容 SDK。项目使用 WPF、WinForms 和系统 RDP ActiveX；构建目标还会调用 Windows .NET Framework 的编译器生成独立代理。实际运行应用要求管理员权限，纯单元测试不因此获得操作真实会话的授权。
+在 Windows 上安装 `global.json` 指定的 .NET SDK。项目使用 WPF、WinForms 和系统 RDP ActiveX；构建目标还会调用 Windows .NET Framework 的编译器生成独立代理。实际运行应用要求管理员权限，纯单元测试不因此获得操作真实会话的授权。
 
 ```powershell
+dotnet restore DesktopTwin.sln --locked-mode
 dotnet build DesktopTwin.sln -c Release -warnaserror
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-xaml.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-invariants.ps1
@@ -12,6 +13,8 @@ dotnet test DesktopTwin.sln -c Release --no-build
 ```
 
 四步分别检查编译、XAML 绑定/资源、常量单一来源和测试。工作流定义在 `.github/workflows/build.yml`；其他 fork 需要自行检查 Actions 是否启用，没有运行记录不能写成 CI 通过。
+
+CI 另有 Debug 测试、recommended 静态分析、复杂度、架构依赖及核心覆盖率门禁。完整复现命令、规则例外与剩余架构债务见 [质量门禁](docs/quality-gates.md)。普通测试成功不代表覆盖率门禁也已通过。
 
 在 Windows 11 24H2 或更新且支持相对鼠标的机器上，还可运行独立原生控件冒烟检查：
 

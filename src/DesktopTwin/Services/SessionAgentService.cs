@@ -325,7 +325,7 @@ internal sealed class SessionAgentService : IDisposable
         return _lastAgentProbeResult;
     }
 
-    private bool ProbeAgentProcess()
+    private static bool ProbeAgentProcess()
     {
         var sessionId = ChildSessionNativeMethods.TryGetChildSessionId();
         if (sessionId is null)
@@ -755,9 +755,6 @@ internal sealed class SessionAgentService : IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(SessionAgentService));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }

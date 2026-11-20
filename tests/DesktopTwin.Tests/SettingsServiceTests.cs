@@ -93,6 +93,84 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void NullSectionsAndCollectionsAreRepairedAndPersisted()
+    {
+        var path = Path.Combine(_directory, "settings.json");
+        File.WriteAllText(path, """
+            { "SettingsVersion": 1, "Session": null, "Launch": null,
+              "Window": null, "Automation": null }
+            """);
+        using (var service = new SettingsService(_directory))
+        {
+            Assert.NotNull(service.Current.Session);
+            Assert.NotNull(service.Current.Launch.RecentTargets);
+            Assert.NotNull(service.Current.Window);
+            Assert.NotNull(service.Current.Automation.AutoLoginPasswords);
+        }
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+        foreach (var section in new[] { "Session", "Launch", "Window", "Automation" })
+            Assert.Equal(System.Text.Json.JsonValueKind.Object, json.RootElement.GetProperty(section).ValueKind);
+        using var reloaded = new SettingsService(_directory);
+        Assert.NotNull(reloaded.Current.Launch.RecentTargets);
+    }
+
+    [Fact]
+    public void NullPasswordTableDoesNotLoseLegacyPassword()
+    {
+        File.WriteAllText(Path.Combine(_directory, "settings.json"), """
+            { "SettingsVersion": 1,
+              "Launch": { "RecentTargets": null },
+              "Automation": { "AutoLoginPasswords": null,
+                "AutoLoginPassword": "legacy", "AutoLoginUserName": " Example " } }
+            """);
+        using var service = new SettingsService(_directory);
+        Assert.Empty(service.Current.Launch.RecentTargets);
+        Assert.Equal("legacy", service.Current.Automation.AutoLoginPasswords["EXAMPLE"]);
+        Assert.Null(service.Current.Automation.LegacyAutoLoginPassword);
+    }
+
+    [Fact]
+    public void FlushAfterDisposeHasNoSideEffects()
+    {
+        var service = new SettingsService(_directory);
+        service.Dispose();
+        Assert.Throws<ObjectDisposedException>(service.Flush);
+        Assert.False(File.Exists(service.SettingsPath));
+    }
+
+    [Fact]
+    public async Task DeferredSavePersistsTheLatestChange()
+    {
+        using var service = new SettingsService(_directory);
+        service.Current.Session.DesktopWidth = 2560;
+        service.SaveSoon();
+        service.Current.Session.DesktopWidth = 3840;
+        service.SaveSoon();
+        using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!File.Exists(service.SettingsPath)) await Task.Delay(25, timeout.Token);
+        using var reader = new SettingsService(_directory);
+        Assert.Equal(3840, reader.Current.Session.DesktopWidth);
+    }
+
+    [Fact]
+    public void SaveSoonAndRepeatedDisposeDoNothingAfterDisposal()
+    {
+        var service = new SettingsService(_directory);
+        service.Dispose();
+        service.SaveSoon();
+        service.Dispose();
+        Assert.False(File.Exists(service.SettingsPath));
+    }
+
+    [Fact]
+    public void JsonNullRootUsesDefaults()
+    {
+        File.WriteAllText(Path.Combine(_directory, "settings.json"), "null");
+        using var service = new SettingsService(_directory);
+        Assert.Equal(1920, service.Current.Session.DesktopWidth);
+    }
+
+    [Fact]
     public void 最近使用列表去重后置顶由界面负责_此处只验证可序列化()
     {
         using (var writer = new SettingsService(_directory))

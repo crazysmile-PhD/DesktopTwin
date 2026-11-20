@@ -114,7 +114,7 @@ internal sealed class UuViewSwitchService : IDisposable
         AppLog.Info($"UU 视角切换：目标={target} 自动={requested.HasValue} 串流端=[{string.Join(',', streamers)}]");
         var result = target == UuViewTarget.Host
             ? await SwitchToMainAsync(token).ConfigureAwait(false)
-            : await SwitchToChildAsync(token, requested.HasValue).ConfigureAwait(false);
+            : await SwitchToChildAsync(requested.HasValue, token).ConfigureAwait(false);
         return result with { Target = result.Success ? target : null };
     }
 
@@ -142,7 +142,7 @@ internal sealed class UuViewSwitchService : IDisposable
         return new Result(confirmed, Locale.Get(confirmed ? "Uu.Result.ToMain" : "Uu.Result.ToMain.StreamerStuck"));
     }
 
-    private async Task<Result> SwitchToChildAsync(CancellationToken token, bool existingSessionOnly)
+    private async Task<Result> SwitchToChildAsync(bool existingSessionOnly, CancellationToken token)
     {
         var generation = _childSessionService.StartGeneration;
         if (existingSessionOnly && ChildSessionNativeMethods.TryGetChildSessionId() is null)
@@ -411,9 +411,6 @@ internal sealed class UuViewSwitchService : IDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(UuViewSwitchService));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 }

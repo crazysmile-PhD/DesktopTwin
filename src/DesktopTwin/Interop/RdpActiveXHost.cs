@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -11,6 +11,7 @@ using DesktopTwin.Localization;
 
 namespace DesktopTwin.Interop;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2201", Justification = "COM adapters surface HRESULT failures as COMException for optional capability probes.")]
 internal sealed class RdpActiveXHost : AxHost
 {
     // Windows 10+ 自带的非脚本化 RDP ActiveX 控件（MsRdpClient10）。

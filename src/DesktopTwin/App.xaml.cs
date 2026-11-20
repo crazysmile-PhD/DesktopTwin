@@ -19,6 +19,7 @@ namespace DesktopTwin;
 /// <summary>
 /// 应用入口。负责组装服务与主窗口，并统一处理未捕获异常。
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "WPF owns the application lifetime; OnExit disposes all owned resources.")]
 public partial class App : Application
 {
     private const string SingleInstanceMutexName = @"Global\DesktopTwin.SingleInstance";

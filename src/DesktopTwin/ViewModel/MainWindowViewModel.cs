@@ -21,7 +21,7 @@ namespace DesktopTwin.ViewModel;
 /// <summary>
 /// 主窗口 ViewModel：把 <see cref="ChildSessionService"/> 的状态映射为界面可绑定的属性与命令。
 /// </summary>
-public partial class MainWindowViewModel : ObservableObject
+public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 {
     private const double DefaultWindowWidth = 1280d;
     private const double SmallWindowWidth = 500d;
@@ -38,6 +38,7 @@ public partial class MainWindowViewModel : ObservableObject
     private DiagnosticsWindow? _diagnosticsWindow;
     private bool _startRequested;
     private bool _uuSwitchInProgress;
+    private bool _disposed;
 
     [ObservableProperty]
     private Brush _connectionStatusBrush = Brushes.Red;
@@ -716,8 +717,10 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>
     /// 窗口关闭时释放热键与后台服务。
     /// </summary>
-    internal void Detach()
+    public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _childSessionService.DesktopSizeChanged -= OnDesktopSizeChanged;
         _childSessionService.RelativeMouseModeConfigured -= OnRelativeMouseModeConfigured;
         _globalHotkey?.Dispose();
@@ -1031,7 +1034,7 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var systemEnabled = autoLogin.IsSystemAutoLoginEnabled(out var systemUser);
+        var systemEnabled = AutoLoginService.IsSystemAutoLoginEnabled(out var systemUser);
         var choice = await AutoLoginDialog.ShowAsync(
             AutoLoginEnabled,
             HasAutoLoginPassword,
@@ -1068,7 +1071,7 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        if (!autoLogin.TryOpenSystemAutoLoginSettings(out var error))
+        if (!AutoLoginService.TryOpenSystemAutoLoginSettings(out var error))
         {
             ShowNotification(Locale.Get("AutoLogin.OpenFailed.Title"), error, InfoBarSeverity.Warning, TimeSpan.FromSeconds(7));
             return;

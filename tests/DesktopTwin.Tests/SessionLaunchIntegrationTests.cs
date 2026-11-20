@@ -87,7 +87,7 @@ public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchF
         var prefix = "DesktopTwin-SessionLaunch-Test" + Guid.NewGuid().ToString("N") + "-";
         await Task.Run(() => ChildSessionProcessLauncher.LaunchWithTemporaryTaskAsync(
             _fixture.SessionId, _fixture.Target, "check-tasks " + prefix, _fixture.Directory, false, false,
-            prefix, default, () => _fixture.SessionId));
+            prefix, () => _fixture.SessionId, default));
         Assert.Equal("0", File.ReadAllText(Path.Combine(_fixture.Directory, "tasks-at-target-start.txt")));
         // The scheduler worker exits after its receipt; deleting its definition must not
         // tear down the independently launched target when the worker subsequently exits.

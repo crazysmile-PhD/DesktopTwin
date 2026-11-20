@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -88,6 +87,7 @@ public sealed class SettingsService : IDisposable
     {
         lock (_syncRoot)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
             _savePending = false;
             WriteToDisk();
@@ -132,79 +132,6 @@ public sealed class SettingsService : IDisposable
         }
     }
 
-    /// <summary>
-    /// 把 0.2.3 测试版留下的「单账户密码」搬进多账户密码表。
-    ///
-    /// 只做一次：搬完就把旧字段清空。这样从测试版升级过来的用户不用重新输一遍密码，
-    /// 之后这份数据就只剩新结构。
-    /// </summary>
-    /// <returns>有改动时返回 true。</returns>
-    private static bool MigrateLegacyPassword(AppSettings settings)
-    {
-        var automation = settings.Automation;
-        if (automation is null || string.IsNullOrWhiteSpace(automation.LegacyAutoLoginPassword))
-        {
-            return false;
-        }
-
-        var account = string.IsNullOrWhiteSpace(automation.AutoLoginUserName)
-            ? Environment.UserName
-            : automation.AutoLoginUserName.Trim();
-
-        // 已经有这个账户的记录了就以新的为准，不覆盖用户后来设置过的密码。
-        var hasEntry = false;
-        foreach (var key in automation.AutoLoginPasswords.Keys)
-        {
-            if (string.Equals(key, account, StringComparison.OrdinalIgnoreCase))
-            {
-                hasEntry = true;
-                break;
-            }
-        }
-
-        if (!hasEntry)
-        {
-            automation.AutoLoginPasswords[account] = automation.LegacyAutoLoginPassword!;
-            AppLog.Info($"已把旧版保存的密码迁移到账户「{account}」名下。");
-        }
-
-        automation.LegacyAutoLoginPassword = null;
-        return true;
-    }
-
-    /// <summary>
-    /// 反序列化出来的密码表换成「不区分大小写」的字典。
-    ///
-    /// System.Text.Json 重建 Dictionary 时用的是默认比较器，属性上声明的
-    /// OrdinalIgnoreCase 只对「新建的实例」有效——从文件读回来的那份会变成区分大小写，
-    /// 于是「存的是 batvb、查的是 Batvb」就取不到密码。这里读出来就统一换掉。
-    /// </summary>
-    private static void NormalizePasswordTable(AppSettings settings)
-    {
-        var source = settings.Automation?.AutoLoginPasswords;
-        if (source is null)
-        {
-            if (settings.Automation is not null)
-            {
-                settings.Automation.AutoLoginPasswords = new Dictionary<string, string>(
-                    StringComparer.OrdinalIgnoreCase);
-            }
-
-            return;
-        }
-
-        var normalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var pair in source)
-        {
-            if (!string.IsNullOrWhiteSpace(pair.Key))
-            {
-                normalized[pair.Key] = pair.Value;
-            }
-        }
-
-        settings.Automation!.AutoLoginPasswords = normalized;
-    }
-
     private AppSettings Load()
     {
         try
@@ -218,8 +145,7 @@ public sealed class SettingsService : IDisposable
             var settings = JsonSerializer.Deserialize<AppSettings>(json, SerializerOptions)
                 ?? new AppSettings { SettingsVersion = AppSettings.CurrentVersion };
 
-            NormalizePasswordTable(settings);
-            _migrated = Migrate(settings) | MigrateLegacyPassword(settings);
+            _migrated = AppSettingsNormalizer.NormalizeAndMigrate(settings, Environment.UserName);
             return settings;
         }
         catch (Exception exception) when (exception is IOException
@@ -229,46 +155,6 @@ public sealed class SettingsService : IDisposable
             AppLog.Warn($"读取设置失败，已回退到默认设置：{SettingsPath}", exception);
             return new AppSettings { SettingsVersion = AppSettings.CurrentVersion };
         }
-    }
-
-    /// <summary>
-    /// 把旧版本写下的设置迁移到当前默认值。
-    ///
-    /// 默认值一改，旧文件里存的仍是按旧默认值记下的值——用户升级后看不到任何变化。
-    /// 所以凡是「改默认值」都要在这里补一条迁移，并把 <see cref="AppSettings.CurrentVersion"/> 加一。
-    /// </summary>
-    /// <returns>有改动时返回 true，调用方据此立刻写回。</returns>
-    private static bool Migrate(AppSettings settings)
-    {
-        var changed = false;
-
-        // 反序列化后可能为 null（JSON 里显式写了 "Session": null），先补齐再谈迁移。
-        // 这一步不能放在版本判断之后：已是当前版本的文件照样可能带着 null。
-        if (settings.Session is null)
-        {
-            settings.Session = new SessionSettings();
-            changed = true;
-        }
-
-        if (settings.Automation is null)
-        {
-            settings.Automation = new AutomationSettings();
-            changed = true;
-        }
-
-        if (settings.SettingsVersion >= AppSettings.CurrentVersion)
-        {
-            return changed;
-        }
-
-        // v1：画面显示比例默认值由「自适应缩放」改为 1:1。
-        if (settings.SettingsVersion < 1)
-        {
-            settings.Session.SmartSizing = false;
-        }
-
-        settings.SettingsVersion = AppSettings.CurrentVersion;
-        return true;
     }
 
     private void WriteToDisk()
