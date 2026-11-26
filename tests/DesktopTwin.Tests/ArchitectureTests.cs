@@ -1,4 +1,5 @@
 using DesktopTwin.Models;
+using DesktopTwin.Contracts;
 using DesktopTwin.Services;
 using NetArchTest.Rules;
 using System.Collections.Immutable;
@@ -84,6 +85,21 @@ public sealed class ArchitectureTests
             .HaveName(nameof(DesktopSessionHost)).ShouldNot()
             .HaveDependencyOnAny("DesktopTwin.View", "DesktopTwin.ViewModel", "DesktopTwin.Interop", "System.Windows").GetResult();
         Assert.True(result.IsSuccessful, string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Fact]
+    public void SessionLifecycleDoesNotDependOnWpfOrWindowsImplementations()
+    {
+        var assembly = typeof(AppSettings).Assembly;
+        foreach (var type in new[] { typeof(ChildSessionService), typeof(SessionConnection), typeof(SessionLogoffOperation),
+                     typeof(IChildSessionPlatform) })
+        {
+            var result = Types.InAssembly(assembly).That().HaveName(type.Name).ShouldNot()
+                .HaveDependencyOnAny("DesktopTwin.View", "DesktopTwin.ViewModel", "DesktopTwin.Interop",
+                    "System.Windows", "Microsoft.Win32", "DesktopTwin.Services.AutoLoginService",
+                    "DesktopTwin.Services.ChildSessionEnvironmentCheck").GetResult();
+            Assert.True(result.IsSuccessful, string.Join(", ", result.FailingTypeNames ?? []));
+        }
     }
 
     [Fact]

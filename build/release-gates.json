@@ -120,5 +120,46 @@
       "DesktopTwin.Tests.CredentialDialogWatchTests.RestartWaitsForCanceledWorkToDrainAndOldTokenStaysCanceled",
       "DesktopTwin.Tests.CredentialDialogWatchTests.FaultsAndCancellationAreObservedAndDoNotPoisonTheNextConnection"
     ]
+  },
+  "LIFE002": {
+    "description": "One dispatcher-owned connection state machine coalesces settings, bounds teardown/retry/login, rejects stale callbacks and cancels logoff/launch intent; tests construct the real lifecycle with virtual time and fake platform ports.",
+    "tests": [
+      "DesktopTwin.Tests.ArchitectureTests.SessionLifecycleDoesNotDependOnWpfOrWindowsImplementations",
+      "DesktopTwin.Tests.SessionConnectionTests.AQueuedOldTimeoutCannotFinishAReplacementOperation",
+      "DesktopTwin.Tests.SessionConnectionTests.DisconnectAndReleaseAreObservedWithoutAFixedOneSecondDelay",
+      "DesktopTwin.Tests.SessionConnectionTests.InitialFailureRetriesOnceAndDuplicateCallbacksCannotSpendTheBudget",
+      "DesktopTwin.Tests.SessionConnectionTests.LoginCompletesSharedWaitersAndReleasesTheOnlyDeadlineTimer",
+      "DesktopTwin.Tests.SessionConnectionTests.LostLoginCallbackTimesOutAndLateLoginCannotReviveTheOperation",
+      "DesktopTwin.Tests.SessionConnectionTests.MissingDisconnectOrReleaseHasOneBoundedFailure(disconnected: False, timeout: 60)",
+      "DesktopTwin.Tests.SessionConnectionTests.MissingDisconnectOrReleaseHasOneBoundedFailure(disconnected: True, timeout: 10)",
+      "DesktopTwin.Tests.SessionConnectionTests.NativeConnectExceptionsUseTheSameBoundedRetryPath",
+      "DesktopTwin.Tests.SessionConnectionTests.NativeDisconnectAndPollingErrorsFinishWaitersEvenIfCleanupAlsoFails",
+      "DesktopTwin.Tests.SessionConnectionTests.SettingsDuringBackoffAndReleaseCoalesceIntoOneConnectWithLatestSize",
+      "DesktopTwin.Tests.SessionConnectionTests.SettingsDuringConnectRestartOnceAndSynchronousLoginOwnsItsTimer",
+      "DesktopTwin.Tests.SessionConnectionTests.SettingsRetriesUseTwoFourEightSecondsAndStopAfterThreeRetries",
+      "DesktopTwin.Tests.SessionConnectionTests.UnexpectedDisconnectAfterLoginIsReportedOnceAndDisposalCancelsQueuedWork",
+      "DesktopTwin.Tests.SessionLifecycleTests.ConcurrentStartsSharePreflightAndOneConnection",
+      "DesktopTwin.Tests.SessionLifecycleTests.ConnectedActiveSessionDoesNotReconnectOrRepeatPreflight",
+      "DesktopTwin.Tests.SessionLifecycleTests.CredentialWatcherCannotRestartWhileTheControlIsStillDisconnecting",
+      "DesktopTwin.Tests.SessionLifecycleTests.ExitDoesNotTreatRejectedLogoffRequestAsAccepted",
+      "DesktopTwin.Tests.SessionLifecycleTests.ExitJoinsTheAcceptedRequestWithoutWaitingForWindowsCleanup",
+      "DesktopTwin.Tests.SessionLifecycleTests.ExpectedSessionMismatchDoesNotCancelTheCurrentStartOrLogoffAReplacement",
+      "DesktopTwin.Tests.SessionLifecycleTests.ExpiredStartCannotJoinNewGeneration",
+      "DesktopTwin.Tests.SessionLifecycleTests.HiddenWindowStaysHiddenAndStatusQueueIsBoundedDuringBusyUi",
+      "DesktopTwin.Tests.SessionLifecycleTests.InitialRetryGetsAFreshDeadlineAndDoesNotRestartCredentialWatcher",
+      "DesktopTwin.Tests.SessionLifecycleTests.LogoffCancelsQueuedLaunchWithoutWaitingForTheNativeLaunchToFinish",
+      "DesktopTwin.Tests.SessionLifecycleTests.LogoffDuringPreflightCannotEnableOrReconnectTheOldSession",
+      "DesktopTwin.Tests.SessionLifecycleTests.MissingSettingsReconnectCallbackExpiresOnceAndPreservesPendingSettings",
+      "DesktopTwin.Tests.SessionLifecycleTests.NewerEnvironmentCheckWinsEvenWhenOlderCollectionFinishesLast",
+      "DesktopTwin.Tests.SessionLifecycleTests.OldInitialRetryCannotClearReplacementAttempt",
+      "DesktopTwin.Tests.SessionLifecycleTests.PendingSettingsForNextConnectionAreNotAnActiveReconnect",
+      "DesktopTwin.Tests.SessionLifecycleTests.SettingsCoalesceWhileDisconnectingAndUseTheLatestConfiguration",
+      "DesktopTwin.Tests.SessionLogoffOperationTests.CompletionObservationHasABoundedTimeout",
+      "DesktopTwin.Tests.SessionLogoffOperationTests.DisposingStopsObservationWithoutCancellingAcceptedRequest",
+      "DesktopTwin.Tests.SessionLogoffOperationTests.ExitCanFinishAfterRequestWhileWindowsIsStillCleaningUp",
+      "DesktopTwin.Tests.SessionLogoffOperationTests.FailedRequestIsNotReportedAsAcceptedOrCompleted",
+      "DesktopTwin.Tests.SessionLogoffOperationTests.MissingSessionNeedsNoCompletionPolling",
+      "DesktopTwin.Tests.SessionLogoffOperationTests.ReplacementSessionIsNotWaitedOn"
+    ]
   }
 }

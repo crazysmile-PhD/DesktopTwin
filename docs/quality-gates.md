@@ -10,9 +10,10 @@
 - 三个项目提交 NuGet 锁文件，CI 以 locked mode 还原并审计直接和传递依赖。普通还原就纳入单文件分析器，避免发布时额外引入未锁定的 ILLink 依赖。
 - Debug、Release 均编译与测试，原生冒烟项目参与编译；测试有挂起诊断超时，作业有总超时。
 - `verify-companion-build.ps1` 验证无修改建置不改写代理，强制重建确实重新生成代理且 SHA-256 不变。不以耗时设跨机器门槛；记录的耗时仅供观察。
-- 架构测试限制 Models 对 UI、存储、服务和原生操作的依赖；诊断历史不能依赖窗口或原生操作。所有服务均禁止依赖具体视窗，无豁免。会话端口与 DesktopSessionHost 不能依赖 WPF 或原生控件。
+- 架构测试限制 Models 对 UI、存储、服务和原生操作的依赖；诊断历史不能依赖窗口或原生操作。所有服务均禁止依赖具体视窗，无豁免。会话端口与 DesktopSessionHost 不能依赖 WPF 或原生控件；会话编排、连接状态机和注销观察还禁止依赖 Windows 实现、注册表和具体自动登录服务。
 - Release 测试必须实际执行、全部通过、零跳过；空或缺少 TRX、运行级清理失败、缺少覆盖率、缺少受保护类型均失败。异步方法生成的状态机也接受覆盖率门槛。
-- `build/coverage-policy.json` 对核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。DesktopSessionHost、AccountCredentialStore 与 CredentialDialogWatch 要求 95% 行、90% 分支覆盖率。外部命令另以真实隔离进程验证输出、退出、超时和进程树清理，不宣称已覆盖所有操作系统错误分支。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
+- 原生桌面、ActiveX 与可见进程夹具使用 `WindowsDesktopTestGroup` 定义的同一集合，隔离共享桌面和 WinForms 状态；保留原有断言与截止时间。纯会话状态、协议和设置测试仍按 xUnit 默认并行执行。[集合并行规则](https://xunit.net/docs/running-tests-in-parallel)
+- `build/coverage-policy.json` 对核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。SessionConnection、DesktopSessionHost、AccountCredentialStore 与 CredentialDialogWatch 要求 95% 行、90% 分支覆盖率。外部命令另以真实隔离进程验证输出、退出、超时和进程树清理，不宣称已覆盖所有操作系统错误分支。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
 - 保留 XAML 绑定、资源、常量唯一来源检查。图标改为真实枚举成员精确匹配，程序集不存在时失败。
 - Actions 固定提交 SHA，Dependabot 每周检查 NuGet 和 Actions 更新。两种单文件包都接受锁定还原与分析器检查。
 
@@ -31,7 +32,7 @@
 
 ## 尚未解决的架构债务
 
-MainWindowViewModel、MainWindow、ChildSessionService、环境检查和 AutoLoginService 仍承担较多职责。具体视窗依赖已被端口替换，但会话服务仍直接调用 WTS，使用 Dispatcher/真实时间，连接重试仍分布于服务和 ActiveX 层。
+MainWindowViewModel、MainWindow、环境检查和 AutoLoginService 仍承担较多职责。ChildSessionService 仍组合设置命令、状态文本和自动启动策略，但 Windows 操作、调度和时间均已显式注入，连接重试只由 SessionConnection 拥有。LIFE002 用正常构造的服务、平台/RDP 替身和虚拟时间验证重试、超时、设置合并、过期回调、注销与程序启动取消；不再拼装未初始化对象或反射私有字段。这些测试覆盖编排契约，真实 WTS/ActiveX 连接仍有单独验证边界。
 
 设置对象图已改为 sealed record、init-only 属性与不可变集合；SettingsService.Update 在短锁内发布完整快照，写盘使用独立锁，避免普通修改等待磁盘 I/O。AccountCredentialStore 通过快照读取与事务更新访问凭据。CredentialDialogWatch 持有监听 Task，并串行交接取消后的工作；已进入 UI Automation/COM 的调用仍须协作式收尾。后续仍应抽出连接状态机与平台端口，并继续拆分身份查询和 UI Automation。每次拆分先覆盖状态转换与资源所有权。
 

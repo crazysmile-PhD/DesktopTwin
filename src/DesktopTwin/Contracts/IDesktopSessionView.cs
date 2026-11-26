@@ -31,9 +31,7 @@ internal interface IRdpSessionClient
     void SetAudioMuted(bool muted);
     void SetInputBlocked(bool enabled);
     void ConnectToChildSession(Size size);
-    void ReconnectToChildSession(Size size);
     void DisconnectSession();
-    void CancelPendingReconnect();
     void SendShowDesktopShortcut();
     void SendTaskViewShortcut();
 }

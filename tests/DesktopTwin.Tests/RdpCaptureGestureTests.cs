@@ -4,6 +4,7 @@ using DesktopTwin.Interop;
 
 namespace DesktopTwin.Tests;
 
+[Collection(WindowsDesktopTestGroup.Name)]
 public sealed class RdpCaptureGestureTests
 {
     [Fact]

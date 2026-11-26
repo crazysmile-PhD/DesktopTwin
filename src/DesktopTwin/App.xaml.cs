@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Threading;
 using DesktopTwin.Localization;
 using DesktopTwin.Diagnostics;
+using DesktopTwin.Interop;
 using DesktopTwin.Services;
 using DesktopTwin.View;
 using DesktopTwin.ViewModel;
@@ -132,12 +133,7 @@ public partial class App : Application
             }
         };
 
-        _autoLogin = new AutoLoginService(_settings);
-        _childSessionService = new ChildSessionService(_settings, service =>
-        {
-            _mainWindow = new MainWindow(service, _settings);
-            return new WpfDesktopSessionView(_mainWindow);
-        }, _autoLogin);
+        _childSessionService = ComposeSession(_settings);
 
         // 应用入口拥有具体视窗；会话服务按需请求工厂，不引用 WPF 视窗实现。
         using (new PerformanceTrace("主窗口构造与显示"))
@@ -169,6 +165,17 @@ public partial class App : Application
             LegacyUuAgentCleanup.Run();
             ChildSessionProcessLauncher.SweepOrphanTasks();
         });
+    }
+
+    private ChildSessionService ComposeSession(SettingsService settings)
+    {
+        _autoLogin = new AutoLoginService(settings);
+        return new ChildSessionService(settings, service =>
+        {
+            _mainWindow = new MainWindow(service, settings, new MainWindowViewModel(service, settings, _autoLogin));
+            return new WpfDesktopSessionView(_mainWindow);
+        }, new WindowsChildSessionPlatform(TimeProvider.System),
+            new WpfSessionDispatcher(Dispatcher), TimeProvider.System, _autoLogin);
     }
 
     /// <inheritdoc />

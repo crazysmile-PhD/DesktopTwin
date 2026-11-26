@@ -20,28 +20,30 @@ internal sealed class SessionLogoffOperation
         Task<uint?> request,
         Func<uint?> getCurrentSessionId,
         TimeSpan timeout,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         Request = request;
-        Completion = ObserveAsync(getCurrentSessionId, timeout, cancellationToken);
+        Completion = ObserveAsync(getCurrentSessionId, timeout, timeProvider, cancellationToken);
     }
 
     private async Task ObserveAsync(
         Func<uint?> getCurrentSessionId,
         TimeSpan timeout,
+        TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
         var sessionId = await Request.ConfigureAwait(false);
         if (sessionId is null) return;
 
-        var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+        var startedAt = timeProvider.GetTimestamp();
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (getCurrentSessionId() != sessionId) return;
-            if (Environment.TickCount64 >= deadline)
+            if (timeProvider.GetElapsedTime(startedAt) >= timeout)
                 throw new TimeoutException("Windows 仍在注销分身会话，请稍后重试。");
-            await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(200), timeProvider, cancellationToken).ConfigureAwait(false);
         }
     }
 }

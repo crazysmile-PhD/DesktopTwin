@@ -28,6 +28,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private readonly ChildSessionService _childSessionService;
     private readonly SettingsService _settings;
+    private readonly AutoLoginService? _autoLogin;
     private readonly DispatcherTimer _notificationTimer;
     private DiagnosticsWindow? _diagnosticsWindow;
     private bool _startRequested;
@@ -138,7 +139,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 创建 ViewModel 并订阅服务事件。
     /// </summary>
     public MainWindowViewModel(ChildSessionService childSessionService, SettingsService settings)
+        : this(childSessionService, settings, null) { }
+
+    /// <summary>Receives the app-owned credential service independently of session orchestration.</summary>
+    internal MainWindowViewModel(ChildSessionService childSessionService, SettingsService settings, AutoLoginService? autoLogin)
     {
+        _autoLogin = autoLogin;
         using var timing = new PerformanceTrace("界面服务组装（ViewModel）");
         _childSessionService = childSessionService;
         _settings = settings;
@@ -157,7 +163,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _isSmallWindowMode = settings.Current.Window.SmallWindowMode;
 
         _autoLoginEnabled = settings.Current.Automation.AutoLoginEnabled;
-        _hasAutoLoginPassword = childSessionService.AutoLogin?.HasStoredPassword == true;
+        _hasAutoLoginPassword = _autoLogin?.HasStoredPassword == true;
 
         _notificationTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -471,7 +477,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
             // 用户点「启动」即视为同意。被禁用或启动失败的情况不在这里处理，
             // 照常走下面的拦截提示，由用户到诊断面板里修。
             if (_childSessionService.HasBlockingEnvironmentIssue
-                && await Task.Run(() => _childSessionService.TryStartTermServiceIfStopped(out _)))
+                && await _childSessionService.TryStartTermServiceIfStoppedAsync())
             {
                 await _childSessionService.RefreshEnvironmentCheckAsync();
                 _childSessionService.RefreshState();
@@ -760,7 +766,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ShowAutoLoginOptionsAsync()
     {
-        var autoLogin = _childSessionService.AutoLogin;
+        var autoLogin = _autoLogin;
         if (autoLogin is null)
         {
             ShowNotification(Locale.Get("AutoLogin.Unavailable.Title"), Locale.Get("AutoLogin.Unavailable.Message"), InfoBarSeverity.Warning);
@@ -804,7 +810,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void OpenSystemAutoLoginSettings()
     {
-        var autoLogin = _childSessionService.AutoLogin;
+        var autoLogin = _autoLogin;
         if (autoLogin is null)
         {
             return;
@@ -828,7 +834,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     private void EnableAppAutoLogin()
     {
-        var autoLogin = _childSessionService.AutoLogin;
+        var autoLogin = _autoLogin;
         AutoLoginEnabled = true;
         _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = true } });
         ShowNotification(
@@ -844,7 +850,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ToggleAutoLoginAsync()
     {
-        var autoLogin = _childSessionService.AutoLogin;
+        var autoLogin = _autoLogin;
         if (autoLogin is null)
         {
             ShowNotification(Locale.Get("AutoLogin.Unavailable.Title"), Locale.Get("AutoLogin.Unavailable.Message"), InfoBarSeverity.Warning);
@@ -886,7 +892,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearAutoLoginPassword()
     {
-        _childSessionService.AutoLogin?.ClearPassword();
+        _autoLogin?.ClearPassword();
         HasAutoLoginPassword = false;
         AutoLoginEnabled = false;
         _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = false } });
@@ -908,7 +914,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <returns>验证通过并保存成功返回 true。</returns>
     private async Task<bool> TrySaveAndVerifyPasswordAsync()
     {
-        var autoLogin = _childSessionService.AutoLogin;
+        var autoLogin = _autoLogin;
         if (autoLogin is null)
         {
             return false;

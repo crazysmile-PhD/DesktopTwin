@@ -2,7 +2,6 @@ using System;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using DesktopTwin.Models;
 using DesktopTwin.Services;
@@ -20,7 +19,6 @@ internal sealed class RdpActiveXHost : AxHost
     private const short VariantTrue = -1;
     private const int RedirectAudioToClient = 0;
     private const int DisableRemoteAudio = 2;
-    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(1);
 
     private static readonly RemoteKey LeftWindowsKey = new(0x5B, IsExtended: true);
     private static readonly RemoteKey DKey = new(0x20, IsExtended: false);
@@ -37,13 +35,6 @@ internal sealed class RdpActiveXHost : AxHost
     internal bool AbsoluteMouseModeResetAccepted { get; private set; }
     internal bool LoginComplete => _displayReady;
 
-    /// <summary>
-    /// 待重连的代际号。取消（DisconnectSession / ResetDisconnectState）时自增，
-    /// 让已经排上、还在等「会话释放」的那次重连作废——否则它醒来后照样去连，
-    /// 把刚刚发起的断开又接回来。
-    /// </summary>
-    private int _reconnectGeneration;
-    private DrawingSize? _pendingReconnectDesktopSize;
     private bool _smartSizingEnabled = true;
     private bool _displayReady;
     private RdpDisplaySettings? _lastDisplayRequest;
@@ -100,7 +91,8 @@ internal sealed class RdpActiveXHost : AxHost
     }
 
     internal void ConnectToChildSession(DrawingSize desktopSize)
-    {        if (ConnectedState != 0)
+    {
+        if (ConnectedState != 0)
         {
             return;
         }
@@ -150,6 +142,7 @@ internal sealed class RdpActiveXHost : AxHost
 
         var advancedSettings = GetComProperty(client, "AdvancedSettings7")
             ?? throw new COMException(Locale.Get("Rdp.Error.AdvancedSettings"));
+        ApplyReconnectPolicy(advancedSettings);
         ApplyAbsoluteMouseMode(client, advancedSettings);
         RunComStep(Locale.Get("Rdp.Step.Port"), () =>
             SetComProperty(
@@ -183,10 +176,10 @@ internal sealed class RdpActiveXHost : AxHost
 
         ApplyCredentials(client);
 
+        _disconnectRequested = false;
         _connectionAttemptInProgress = true;
         _connectionFailureReported = false;
         _lastConnectionDiagnostic = null;
-        _disconnectRequested = false;
         try
         {
             RunComStep(Locale.Get("Rdp.Step.Connect"), () => InvokeComMethod(client, "Connect"));
@@ -305,6 +298,10 @@ internal sealed class RdpActiveXHost : AxHost
         _audioMuted = muted;
     }
 
+    /// <summary>The session lifecycle owns every retry; the native control must not start its own.</summary>
+    private static void ApplyReconnectPolicy(object advancedSettings) =>
+        SetComProperty(advancedSettings, "EnableAutoReconnect", false);
+
     private void ApplyAbsoluteMouseMode(object client, object advancedSettings)
     {
         var extendedSettings = (IMsRdpExtendedSettings)client;
@@ -351,82 +348,8 @@ internal sealed class RdpActiveXHost : AxHost
         }
     }
 
-    /// <summary>
-    /// 清掉「正在断开」的排队状态。
-    ///
-    /// <see cref="Disconnect"/> 会置 <c>_disconnectRequested</c>，要等 <c>OnDisconnected</c>
-    /// 回调回来才复位。回调一旦丢失，就会永远卡在「正在断开」：
-    /// <see cref="ReconnectToChildSession"/> 走的是「只排队、不重连」那条分支，
-    /// 表现为切回分身时画面一直黑着，用户只能自己去点「启动并连接」。
-    ///
-    /// 调用方必须已经确认过会话状态，否则可能打断一次真正的断开。
-    /// </summary>
-    internal void ResetDisconnectState()
-    {
-        _reconnectGeneration++;
-        _disconnectRequested = false;
-        _pendingReconnectDesktopSize = null;
-    }
-
-    internal void ReconnectToChildSession(DrawingSize desktopSize)
-    {
-        if (_disconnectRequested || _pendingReconnectDesktopSize.HasValue)
-        {
-            _pendingReconnectDesktopSize = desktopSize;
-            return;
-        }
-
-        if (ConnectedState == 0)
-        {
-            // 直接连也作废在途的那次「等会话释放」重连：它拿的是旧尺寸，
-            // 等这边失败（控件回 0）时它会醒过来，用旧分辨率把新的一次顶掉。
-            _reconnectGeneration++;
-            ConnectToChildSession(desktopSize);
-            return;
-        }
-
-        _pendingReconnectDesktopSize = desktopSize;
-        try
-        {
-            if (!DisconnectCore())
-            {
-                _pendingReconnectDesktopSize = null;
-                ConnectToChildSession(desktopSize);
-            }
-        }
-        catch
-        {
-            _pendingReconnectDesktopSize = null;
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// 作废尚未执行的重连。
-    ///
-    /// 切到主桌面时用：那次重连可能正停在「等会话释放」上，等完就会把分身连回来，
-    /// 和「切到整台电脑」的目的正好相反。只是断开（Disconnect）不会动这个标记，
-    /// 所以要显式取消。
-    /// </summary>
-    internal void CancelPendingReconnect()
-    {
-        _reconnectGeneration++;
-        _pendingReconnectDesktopSize = null;
-    }
-
-    internal void DisconnectSession()
-    {
-        _reconnectGeneration++;
-        _pendingReconnectDesktopSize = null;
-        _ = DisconnectCore();
-    }
-
-    /// <summary>
-    /// 主动断开 RDP 连接，但保留远端会话（桌面上的程序继续运行）。
-    /// 走这条路径不会触发「连接意外断开」的失败提示。
-    /// </summary>
-    /// <returns>确实发起了断开返回 true。</returns>
-    internal bool Disconnect() => DisconnectCore();
+    /// <summary>Executes a disconnect; reconnect intent belongs exclusively to the session lifecycle.</summary>
+    internal void DisconnectSession() => _ = DisconnectCore();
 
     private bool DisconnectCore()
     {
@@ -591,17 +514,6 @@ internal sealed class RdpActiveXHost : AxHost
         if (_disconnectRequested)
         {
             _disconnectRequested = false;
-            if (_pendingReconnectDesktopSize.HasValue && !IsDisposed && !Disposing)
-            {
-                try
-                {
-                    BeginInvoke(new Action(ConnectPendingReconnect));
-                }
-                catch (InvalidOperationException)
-                {
-                    _pendingReconnectDesktopSize = null;
-                }
-            }
             return;
         }
 
@@ -627,72 +539,6 @@ internal sealed class RdpActiveXHost : AxHost
             message,
             disconnectReason,
             extendedDisconnectReason);
-    }
-
-    private async void ConnectPendingReconnect()
-    {
-        var generation = _reconnectGeneration;
-
-        await Task.Delay(ReconnectDelay);
-
-        // 等待期间可能被取消（主动断开）或被新的一次重连取代：这时不能再连。
-        if (generation != _reconnectGeneration || IsDisposed || Disposing)
-        {
-            return;
-        }
-
-        var desktopSize = _pendingReconnectDesktopSize;
-        _pendingReconnectDesktopSize = null;
-        if (!desktopSize.HasValue || IsDisposed || Disposing)
-        {
-            return;
-        }
-
-        // 控件回到「已断开」不代表上一轮连接在系统里已经收尾。这时立刻重连，
-        // RDS 会用「访问被拒绝」把新连接顶回来——日志里每次改设置都这样，
-        // 隔几秒再连就好。等会话真的不再是 Active 再连，和「切回分身」那条
-        // 路径（先等会话离开 Active 再 StartAsync）保持一致。
-        await WaitForChildSessionReleasedAsync(TimeSpan.FromSeconds(10));
-        if (generation != _reconnectGeneration || IsDisposed || Disposing)
-        {
-            return;
-        }
-
-        try
-        {
-            ConnectToChildSession(desktopSize.Value);
-        }
-        catch (Exception exception) when (exception is COMException
-                                              or TargetInvocationException
-                                              or InvalidOperationException)
-        {
-            var actualException = exception.GetBaseException();
-            var errorCode = actualException is COMException comException
-                ? comException.ErrorCode
-                : 0;
-            ReportConnectionFailure(
-                $"RDP 自动重新连接失败：{actualException.Message}",
-                errorCode);
-        }
-    }
-
-    /// <summary>
-    /// 等分身会话离开 Active 状态。没有会话（已经注销）也算可以连了。
-    /// </summary>
-    private static async Task WaitForChildSessionReleasedAsync(TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-
-        while (DateTime.UtcNow < deadline)
-        {
-            var sessionId = ChildSessionNativeMethods.TryGetChildSessionId();
-            if (sessionId is null || !ChildSessionNativeMethods.IsSessionActive(sessionId.Value))
-            {
-                return;
-            }
-
-            await Task.Delay(200);
-        }
     }
 
     private void OnFatalError(int errorCode)
@@ -1209,7 +1055,7 @@ internal sealed class RdpActiveXHost : AxHost
             int attemptCount,
             out AutoReconnectContinueState continueStatus)
         {
-            continueStatus = AutoReconnectContinueState.Automatic;
+            continueStatus = AutoReconnectContinueState.Stop;
         }
 
         public void OnAuthenticationWarningDisplayed()
