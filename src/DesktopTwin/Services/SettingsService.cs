@@ -24,7 +24,7 @@ public sealed class SettingsService : IDisposable
     private readonly object _writeLock = new();
     private volatile AppSettings _current;
     private readonly Timer _saveTimer;
-    private bool _savePending;
+    private AppSettings? _persisted;
     private bool _disposed;
     private bool _migrated;
 
@@ -42,6 +42,7 @@ public sealed class SettingsService : IDisposable
         SettingsPath = Path.Combine(SettingsDirectory, "settings.json");
         _saveTimer = new Timer(OnSaveTimerElapsed, state: null, Timeout.Infinite, Timeout.Infinite);
         _current = Load();
+        _persisted = _migrated ? null : _current;
 
         // 迁移过就立刻写回，否则每次启动都要再迁一遍，而且用户看到的是被临时改过的值。
         if (_migrated)
@@ -75,19 +76,20 @@ public sealed class SettingsService : IDisposable
         lock (_syncRoot)
         {
             if (_disposed) return;
-            _current = change(_current) ?? throw new InvalidOperationException("A settings update must return a snapshot.");
+            var next = change(_current) ?? throw new InvalidOperationException("A settings update must return a snapshot.");
+            if (ReferenceEquals(next, _current)) return;
+            _current = next;
             ScheduleSave();
         }
     }
 
     private void ScheduleSave()
     {
-        _savePending = true;
         _saveTimer.Change(SaveDelay, Timeout.InfiniteTimeSpan);
     }
 
     /// <summary>
-    /// 立即写盘，用于「改完马上就要被别的进程读到」的场景。
+    /// 立即写盘；失败向调用方传播，未持久化的快照保留给下次修改或退出时补存。
     /// </summary>
     public void Flush()
     {
@@ -98,7 +100,6 @@ public sealed class SettingsService : IDisposable
             {
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 _saveTimer.Change(Timeout.Infinite, Timeout.Infinite);
-                _savePending = false;
                 snapshot = _current;
             }
             WriteToDisk(snapshot);
@@ -117,11 +118,10 @@ public sealed class SettingsService : IDisposable
             {
                 if (_disposed) return;
                 _disposed = true;
-                snapshot = _savePending ? _current : null;
-                _savePending = false;
+                snapshot = ReferenceEquals(_persisted, _current) ? null : _current;
                 _saveTimer.Dispose();
             }
-            if (snapshot is not null) WriteToDisk(snapshot);
+            if (snapshot is not null) TryWriteToDisk(snapshot);
         }
     }
 
@@ -132,11 +132,10 @@ public sealed class SettingsService : IDisposable
             AppSettings snapshot;
             lock (_syncRoot)
             {
-                if (_disposed || !_savePending) return;
-                _savePending = false;
+                if (_disposed || ReferenceEquals(_persisted, _current)) return;
                 snapshot = _current;
             }
-            WriteToDisk(snapshot);
+            TryWriteToDisk(snapshot);
         }
     }
 
@@ -165,20 +164,26 @@ public sealed class SettingsService : IDisposable
         }
     }
 
-    private void WriteToDisk(AppSettings snapshot)
+    private void TryWriteToDisk(AppSettings snapshot)
     {
         try
         {
-            Directory.CreateDirectory(SettingsDirectory);
-
-            // 先写临时文件再替换，避免写到一半被中断后留下损坏的 settings.json。
-            var temporaryPath = SettingsPath + ".tmp";
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot, SerializerOptions));
-            File.Move(temporaryPath, SettingsPath, overwrite: true);
+            WriteToDisk(snapshot);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             AppLog.Warn($"保存设置失败：{SettingsPath}", exception);
         }
+    }
+
+    private void WriteToDisk(AppSettings snapshot)
+    {
+        Directory.CreateDirectory(SettingsDirectory);
+        var temporaryPath = SettingsPath + ".tmp";
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot, SerializerOptions));
+        File.Move(temporaryPath, SettingsPath, overwrite: true);
+        // Readers may have published a newer snapshot during I/O. Save only this
+        // immutable identity; the newer snapshot must still be considered dirty.
+        lock (_syncRoot) _persisted = snapshot;
     }
 }

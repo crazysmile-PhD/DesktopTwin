@@ -156,7 +156,7 @@ public partial class MainWindow : FluentWindow
         _displayConfirmationTimer.Tick += OnDisplayConfirmationTick;
         DesktopArea.SizeChanged += OnDesktopAreaSizeChanged;
         RdpHost.LoginCompleted += OnDisplayLoginCompleted;
-        RelativeInput = new RelativeInputController(this, settings);
+        RelativeInput = new RelativeInputController(this, settings, childSessionService);
 
         // Topmost 由 XAML 里的 OneWay 绑定驱动（MainWindow.xaml:20），
         // ViewModel 构造时已用设置里的值初始化 IsTopmost。

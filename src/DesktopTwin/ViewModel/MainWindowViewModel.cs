@@ -169,7 +169,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _childSessionService.ConnectionFailed += OnChildSessionConnectionFailed;
         _childSessionService.SystemShortcutsReconnectCompleted += OnSystemShortcutsReconnectCompleted;
         _childSessionService.AudioReconnectCompleted += OnAudioReconnectCompleted;
-        _childSessionService.RelativeMouseModeConfigured += OnRelativeMouseModeConfigured;
         _childSessionService.AutoLaunchSkipped += OnAutoLaunchSkipped;
         _childSessionService.DesktopSizeChanged += OnDesktopSizeChanged;
         UpdateConnectionStatus();
@@ -665,7 +664,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         _disposed = true;
         _notificationTimer.Stop();
         _childSessionService.DesktopSizeChanged -= OnDesktopSizeChanged;
-        _childSessionService.RelativeMouseModeConfigured -= OnRelativeMouseModeConfigured;
     }
 
     /// <summary>
@@ -1117,14 +1115,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var reconnectStarted = _childSessionService.SetRelativeMouseMode(!IsRelativeMouseModeEnabled);
+            _childSessionService.SetRelativeMouseMode(!IsRelativeMouseModeEnabled);
             UpdateConnectionStatus();
-            ShowNotification(
-                reconnectStarted ? Locale.Get("Notify.SettingsApplying") : Locale.Get("Notify.SettingsSaved"),
-                reconnectStarted
-                    ? Locale.Get("Notify.RelativeMouse.Applying")
-                    : Locale.Get("Notify.RelativeMouse.NextConnect"),
-                InfoBarSeverity.Informational);
+            if (!IsRelativeMouseModeEnabled || _childSessionService.ConnectedState != 1)
+                ShowNotification(Locale.Get("Menu.RelativeMouseMode"),
+                    Locale.Get(IsRelativeMouseModeEnabled ? "Notify.RelativeMouse.NextConnect" : "Notify.RelativeMouse.Disabled"),
+                    InfoBarSeverity.Informational);
         }
         catch (Exception exception)
         {
@@ -1471,32 +1467,6 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
                 ? Locale.Get("Notify.Muted.Message")
                 : Locale.Get("Notify.SoundOn.Message"),
                     InfoBarSeverity.Success);
-            }));
-    }
-
-    private void OnRelativeMouseModeConfigured(object? sender, EventArgs e)
-    {
-        // 捕获本次连接的结果，不能把延迟通知写成随后排队设置的成功提示。
-        var enabled = _childSessionService.RelativeMouseModeConfiguredEnabled;
-        var accepted = _childSessionService.RelativeMouseModeSettingsAccepted;
-        _ = Application.Current.Dispatcher.BeginInvoke(
-            DispatcherPriority.Normal,
-            new Action(() =>
-            {
-                if (_childSessionService.ConnectedState != 1
-                    || _childSessionService.RelativeMouseModeEnabled != enabled)
-                {
-                    return;
-                }
-
-                UpdateConnectionStatus();
-                ShowNotification(
-                    Locale.Get("Menu.RelativeMouseMode"),
-                    !accepted ? Locale.Get("Notify.RelativeMouse.Unavailable")
-                        : enabled ? Locale.Get("Notify.RelativeMouse.Requested")
-                        : Locale.Get("Notify.RelativeMouse.Disabled"),
-                    accepted ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
-                    TimeSpan.FromSeconds(8));
             }));
     }
 

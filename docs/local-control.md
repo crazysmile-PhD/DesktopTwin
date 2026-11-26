@@ -34,8 +34,8 @@ Start-Process ./DesktopTwin.exe -ArgumentList @('--control-pipe', $pipeName)
 
 允许键只有 W/A/S/D、Escape、Enter、Tab、Alt、Space，另有独立的固定 Ctrl+Alt 释放手势。没有路径、脚本、任意组合键、系统设置、注销或退出命令。输入与失焦测试、目标启动要求 RDP 已登录、处于控制模式、宿主是前台窗口，且输入焦点得到确认。用户切换到其他窗口后应停止输入测试。失焦测试只激活自己的临时窗口并自动关闭、恢复主窗口。
 
-`relativeAccepted` 只代表连接前属性写入；`relativeReadback` 是登录后回读；`relativeReported` 是 RDP 模式变化回调。任意一个值都不能单独证明游戏转视角可用。对照普通桌面点击、Alt 菜单点击与未按 Alt 的视角变化，记录实际截图与状态，才能判断输入在哪一层失败。
+`relativeRequested` 是当前游戏鼠标开关，`nativeAbsoluteResetAccepted` 只代表原生绝对模式的属性重设被接受。已删除旧的 `relativeAccepted/relativeReadback/relativeReported` 字段。原生属性不证明游戏转视角可用；对照普通桌面点击、Alt 菜单点击与未按 Alt 的视角变化，记录实际截图与状态，才能判断输入在哪一层失败。
 
-会话内输入通道启用后，原生 RDP 保持绝对模式，上述旧字段不代表新通道状态。查询 `sessionInput.ready/captured/rawMoves/status.injectedMoves`；`mouse` 在捕获时直接把相对位移送入同一输入队列，`key` 在通道就绪时由会话内接收端执行。自动测试位移不能替代物理鼠标的 WM_INPUT 捕获验证。Alt 点击让宿主的 RDP 客户端收到 Alt，保持修饰键与坐标点击使用同一路径，最多等待 1200 毫秒确认远端光标可见且捕获已释放后才点击。未确认时返回错误；取消或结束后释放宿主 Alt。直接向接收端发送 Alt 再从 RDP 点击会造成修饰键状态不一致，因此这组复合动作不用独立按键通道。
+会话内输入通道启用后，原生 RDP 保持绝对模式。查询 `sessionInput.ready/captured/rawMoves/status.injectedMoves`；`capturePolling` 在前台、就绪的控制模式下才为 true，停用、隐藏、最小化、失焦和观看模式应为 false。`mouse` 在捕获时直接把相对位移送入同一输入队列，`key` 在通道就绪时由会话内接收端执行。自动测试位移不能替代物理鼠标的 WM_INPUT 捕获验证。Alt 点击让宿主的 RDP 客户端收到 Alt，保持修饰键与坐标点击使用同一路径，最多等待 1200 毫秒确认远端光标可见且捕获已释放后才点击。未确认时返回错误；取消或结束后释放宿主 Alt。直接向接收端发送 Alt 再从 RDP 点击会造成修饰键状态不一致，因此这组复合动作不用独立按键通道。
 
 接口依据：[命名管道选项](https://learn.microsoft.com/en-us/dotnet/api/system.io.pipes.pipeoptions)、[断开时丢弃未读数据](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-disconnectnamedpipe)、[SendInput 与 UIPI](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)。

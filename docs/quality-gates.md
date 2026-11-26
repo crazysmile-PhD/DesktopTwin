@@ -5,10 +5,11 @@
 ## 自动阻断的检查
 
 - `global.json` 固定 .NET SDK 10.0.404，禁止自动滚动；升级时一起更新 SDK、锁文件并验证发布。
-- 所有项目启用 .NET 10 recommended 分析器、可空性与警告即错误。独立 Framework 代理使用 `/warn:4 /warnaserror+`，不宣称它接受了现代 Roslyn 分析。
+- 所有 SDK 项目启用 .NET 10 recommended 分析器、可空性与警告即错误。独立 Framework 代理由固定 SDK 的 Csc 任务引用系统 Framework 程序集编译，使用警告等级 4、警告即错误与确定性输出；不将其等同于主项目完整的分析器检查。
 - CA1502 的方法圈复杂度上限为 25，CA1505 的可维护性指数下限为 20。CA1506 的类型耦合上限为 95、方法为 35，配置集中在 `build/CodeMetricsConfig.txt`。指标不能证明设计良好。
 - 三个项目提交 NuGet 锁文件，CI 以 locked mode 还原并审计直接和传递依赖。普通还原就纳入单文件分析器，避免发布时额外引入未锁定的 ILLink 依赖。
 - Debug、Release 均编译与测试，原生冒烟项目参与编译；测试有挂起诊断超时，作业有总超时。
+- `verify-companion-build.ps1` 验证无修改建置不改写代理，强制重建确实重新生成代理且 SHA-256 不变。不以耗时设跨机器门槛；记录的耗时仅供观察。
 - 架构测试限制 Models 对 UI、存储、服务和原生操作的依赖；诊断历史不能依赖窗口或原生操作。所有服务均禁止依赖具体视窗，无豁免。会话端口与 DesktopSessionHost 不能依赖 WPF 或原生控件。
 - Release 测试必须实际执行、全部通过、零跳过；空或缺少 TRX、运行级清理失败、缺少覆盖率、缺少受保护类型均失败。异步方法生成的状态机也接受覆盖率门槛。
 - `build/coverage-policy.json` 对核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。DesktopSessionHost、AccountCredentialStore 与 CredentialDialogWatch 要求 95% 行、90% 分支覆盖率。外部命令另以真实隔离进程验证输出、退出、超时和进程树清理，不宣称已覆盖所有操作系统错误分支。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
@@ -43,11 +44,13 @@ MainWindowViewModel、MainWindow、ChildSessionService、环境检查和 AutoLog
 | VIEW001 | 默认可读的自动分辨率迁移；窗口恢复时完整进入工作区、标题栏可拖动；固定画面等比与原生控件边界不退化 |
 | CTRL001 | 本地测试接口默认关闭，限制命令和输入范围；拒绝非法请求后仍可处理后续请求，慢速读取不丢失回复 |
 | INPUT001 | 原始移动不经指针加速，相邻移动合并但不重排按钮；租约撤销释放注入状态；真实接收端核对父进程/会话，延迟启动和断线均有界 |
+| INPUT002 | 可重用传输缓冲仍保留输入顺序；分段状态须完整读取，错误会话与无效状态被拒绝；逾时、取消及流的所有权有界 |
+| INPUT002 | 重用传输缓冲仍保持顺序；分段回覆完整读取，拒绝无效状态/会话；逾时不续用取消的通道，取消与底层管道的所有权独立 |
 | ARCH001 | 所有服务不得引用具体视窗；会话端口和视窗所有者不得引用 UI 或 Interop |
 | LIFE001 | 延迟创建且只持有一个视窗；配置失败关闭部分创建对象；关闭前解除订阅并保留清理错误 |
 | CRED001 | 密码策略不依赖平台/UI；加密失败保留旧记录、账户操作隔离、更新不修改读者快照、真实 DPAPI 往返验证 |
 | TEST001 | 整合测试只清理自己的程序，退出竞态得到处理；即使所有案例通过，运行级清理失败也阻断发布 |
-| SET001 | 设置对象图不可变；一次修改原子发布；并发冲刷只写完整快照，失败的修改不污染旧快照 |
+| SET001 | 设置对象图不可变；一次修改原子发布；并发冲刷只写完整快照；写盘失败保留未持久化义务，显式冲刷报告错误，解除占用后退出仍保存最新快照 |
 | PROC001 | 输出读取与退出共享命令截止时间；大量输出不死锁；超时终止仍运行的进程树；父进程退出后遗留的输出管道也不能无限等待 |
 | WATCH001 | 排队前捕获 token，工作完成后才释放 CTS；新监听等待旧监听收尾；取消和异常均被观察，重试预算不被轮询重置 |
 
@@ -66,6 +69,7 @@ dotnet test tests/DesktopTwin.Tests/DesktopTwin.Tests.csproj -c Release --no-bui
 pwsh -NoProfile -File build/test-quality-gates.ps1
 pwsh -NoProfile -File build/verify-test-results.ps1 -ResultsDirectory artifacts/test-results
 pwsh -NoProfile -File build/verify-release-gates.ps1 -ResultsDirectory artifacts/test-results
+pwsh -NoProfile -File build/verify-companion-build.ps1
 ```
 
 使用空或新的覆盖率输出目录；校验器拒绝混杂的不同报告。失败时查看 Actions 的 `quality-reports` 附件。升级依赖后先普通还原以更新锁文件，再执行上述检查与工作流中的两种发布命令。

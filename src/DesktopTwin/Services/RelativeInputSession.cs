@@ -18,6 +18,7 @@ internal sealed class RelativeInputSession : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly InputPacketQueue _queue = new();
     private readonly SemaphoreSlim _signal = new(0, 1);
+    private readonly RelativeInputTransport _transport;
     private Task _loop = Task.CompletedTask;
     private readonly TaskCompletionSource _startup = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _started;
@@ -34,6 +35,7 @@ internal sealed class RelativeInputSession : IDisposable
     {
         _pipe = new NamedPipeServerStream(PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
             PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly | PipeOptions.FirstPipeInstance);
+        _transport = new RelativeInputTransport(_pipe, _stop.Token);
     }
 
     internal static async Task<RelativeInputSession> ConnectAsync(uint sessionId, CancellationToken cancellationToken,
@@ -69,7 +71,8 @@ internal sealed class RelativeInputSession : IDisposable
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        var path = SessionLaunchChannel.EnsureEmbeddedProgram("DesktopTwin.InputReceiver.exe");
+        var path = await Task.Run(() => SessionLaunchChannel.EnsureEmbeddedProgram("DesktopTwin.InputReceiver.exe"),
+            cancellationToken).ConfigureAwait(false);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _stop.Token);
         budget.CancelAfter(TimeSpan.FromSeconds(20));
         var arguments = $"--relative-input {PipeName} {Environment.ProcessId} {sessionId}";
@@ -124,36 +127,64 @@ internal sealed class RelativeInputSession : IDisposable
     // If the UI stalls or loses focus, its short authorization expires even while IO still runs.
     internal void SetForegroundLease(bool allowed)
     {
-        Interlocked.Exchange(ref _armedUntil, allowed ? Environment.TickCount64 + 250 : 0);
-        if (!allowed) { _queue.Clear(); TrySend(new InputPacket(InputOperation.Reset)); }
+        var now = Environment.TickCount64;
+        var previous = Interlocked.Exchange(ref _armedUntil, allowed ? now + 250 : 0);
+        if (!allowed && previous != 0) _queue.Clear();
+        // Repeated UI samples renew a lease, not another reset/heartbeat round trip.
+        if (allowed ? previous <= now : previous != 0) Signal();
     }
     internal bool TrySend(InputPacket packet)
     {
         if (!Ready || Volatile.Read(ref _disposed) != 0) return false;
         if (!_queue.TryAdd(packet)) { Failure = "Input queue overflow; receiver disconnected."; Dispose(); return false; }
+        Signal();
+        return true;
+    }
+
+    private void Signal()
+    {
         try { _signal.Release(); }
         catch (SemaphoreFullException) { } // One wake-up drains the already bounded queue.
-        return true;
+        catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0) { }
     }
 
     private async Task RunAsync(uint sessionId)
     {
         try
         {
+            var armed = false;
+            var exchangedAt = Environment.TickCount64 - 250;
             while (!_stop.IsCancellationRequested)
             {
-                await _signal.WaitAsync(50, _stop.Token).ConfigureAwait(false);
+                var interval = armed ? 50 : 250;
+                var wait = (int)Math.Clamp(interval - (Environment.TickCount64 - exchangedAt), 0, interval);
+                await _signal.WaitAsync(wait, _stop.Token).ConfigureAwait(false);
                 var allowed = Environment.TickCount64 < Interlocked.Read(ref _armedUntil);
-                await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false);
+                if (allowed != armed || Environment.TickCount64 - exchangedAt >= interval)
+                {
+                    await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false);
+                    armed = allowed;
+                    exchangedAt = Environment.TickCount64;
+                }
                 while (_queue.TryTake(out var packet))
                 {
                     if (Environment.TickCount64 >= Interlocked.Read(ref _armedUntil))
-                        packet = new InputPacket(InputOperation.Reset);
+                    {
+                        _queue.Clear();
+                        if (armed)
+                        {
+                            await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false);
+                            armed = false;
+                            exchangedAt = Environment.TickCount64;
+                        }
+                        break;
+                    }
                     await ExchangeAsync(packet, sessionId).ConfigureAwait(false);
+                    exchangedAt = Environment.TickCount64;
                 }
             }
         }
-        catch (Exception error) when (error is IOException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException)
         {
             if (!_stop.IsCancellationRequested) { Failure = error.Message; AppLog.Warn("相对输入通道已断开。", error); }
         }
@@ -161,17 +192,7 @@ internal sealed class RelativeInputSession : IDisposable
     }
     private async Task ExchangeAsync(InputPacket packet, uint sessionId)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(1));
-        using var memory = new MemoryStream(RelativeInputProtocol.PacketBytes);
-        using var writer = new BinaryWriter(memory);
-        RelativeInputProtocol.WritePacket(writer, packet);
-        await _pipe.WriteAsync(memory.ToArray(), deadline.Token).ConfigureAwait(false);
-        var bytes = new byte[RelativeInputProtocol.StatusBytes];
-        await _pipe.ReadExactlyAsync(bytes, deadline.Token).ConfigureAwait(false);
-        using var reader = new BinaryReader(new MemoryStream(bytes));
-        var status = RelativeInputStatus.Read(reader);
-        if (status.SessionId != sessionId) throw new IOException("Input receiver session changed.");
+        var status = await _transport.ExchangeAsync(packet, sessionId).ConfigureAwait(false);
         Volatile.Write(ref _status, status);
     }
     public void Dispose()
@@ -184,6 +205,7 @@ internal sealed class RelativeInputSession : IDisposable
         _ = _startup.Task.ContinueWith(async _ =>
         {
             await _loop.ConfigureAwait(false);
+            _transport.Dispose();
             _signal.Dispose();
             _stop.Dispose();
         }, CancellationToken.None,

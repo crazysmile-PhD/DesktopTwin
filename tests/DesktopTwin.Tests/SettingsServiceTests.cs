@@ -137,6 +137,38 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public void FailedFlushReportsErrorAndPreservesTheSnapshotForExit()
+    {
+        using var service = new SettingsService(_directory);
+        service.Flush();
+        using (var locked = new FileStream(service.SettingsPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            service.Update(s => s with { ChildSessionNoticeAccepted = true });
+            Assert.True(Record.Exception(service.Flush) is IOException or UnauthorizedAccessException);
+        }
+        service.Dispose();
+        using var reader = new SettingsService(_directory);
+        Assert.True(reader.Current.ChildSessionNoticeAccepted);
+    }
+
+    [Fact]
+    public async Task FailedDeferredSaveRetainsTheLatestSnapshotForExit()
+    {
+        using var service = new SettingsService(_directory);
+        // A directory at the final filename deterministically rejects the atomic move.
+        Directory.CreateDirectory(service.SettingsPath);
+        service.Update(s => s with { Session = s.Session with { DesktopWidth = 3840 } });
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!File.Exists(service.SettingsPath + ".tmp")) await Task.Delay(25, timeout.Token);
+        // Flush takes the same write lock, so the failed timer callback has drained.
+        Assert.True(Record.Exception(service.Flush) is IOException or UnauthorizedAccessException);
+        Directory.Delete(service.SettingsPath);
+        service.Dispose();
+        using var reader = new SettingsService(_directory);
+        Assert.Equal(3840, reader.Current.Session.DesktopWidth);
+    }
+
+    [Fact]
     public void NullSectionsAndCollectionsAreRepairedAndPersisted()
     {
         var path = Path.Combine(_directory, "settings.json");

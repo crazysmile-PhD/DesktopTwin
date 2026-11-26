@@ -25,7 +25,6 @@ public sealed class DesktopSessionHostTests
         view.RaiseEvents(new ChildSessionConnectionFailedEventArgs("unobserved", 0));
         Assert.True(view.Client.SmartSizing);
         Assert.True(view.Client.AudioMuted);
-        Assert.True(view.Client.RelativeMouse);
         Assert.False(view.Client.RemoteShortcuts);
         Assert.Equal("first", view.Client.CredentialProvider!()!.Value.Password);
         password = "updated";
@@ -134,12 +133,9 @@ public sealed class DesktopSessionHostTests
         internal Exception? ConfigurationFailure { get; set; }
         internal bool SmartSizing { get; private set; }
         internal bool AudioMuted { get; private set; }
-        internal bool RelativeMouse { get; private set; }
         internal bool RemoteShortcuts { get; private set; }
         internal Func<(string UserName, string Domain, string Password)?>? CredentialProvider { get; private set; }
         public int ConnectedState => 0;
-        public bool RelativeMouseModeSettingsAccepted => false;
-        public bool RelativeMouseModeConfiguredEnabled => false;
         public ChildSessionConnectionFailedEventArgs? LastConnectionDiagnostic => null;
         public event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed;
         public event EventHandler? LoginCompleted;
@@ -151,7 +147,6 @@ public sealed class DesktopSessionHostTests
         }
         public void SetSendSystemShortcutsToRemote(bool enabled) => RemoteShortcuts = enabled;
         public void SetAudioMuted(bool enabled) => AudioMuted = enabled;
-        public void SetRelativeMouseMode(bool enabled) => RelativeMouse = enabled;
         public void SetInputBlocked(bool enabled) { }
         public void ConnectToChildSession(Size size) { }
         public void ReconnectToChildSession(Size size) { }

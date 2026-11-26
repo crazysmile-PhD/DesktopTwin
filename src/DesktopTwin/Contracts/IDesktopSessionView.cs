@@ -22,8 +22,6 @@ internal interface IDesktopSessionView
 internal interface IRdpSessionClient
 {
     int ConnectedState { get; }
-    bool RelativeMouseModeSettingsAccepted { get; }
-    bool RelativeMouseModeConfiguredEnabled { get; }
     ChildSessionConnectionFailedEventArgs? LastConnectionDiagnostic { get; }
     event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed;
     event EventHandler? LoginCompleted;
@@ -31,7 +29,6 @@ internal interface IRdpSessionClient
     void SetSmartSizing(bool enabled);
     void SetSendSystemShortcutsToRemote(bool enabled);
     void SetAudioMuted(bool muted);
-    void SetRelativeMouseMode(bool enabled);
     void SetInputBlocked(bool enabled);
     void ConnectToChildSession(Size size);
     void ReconnectToChildSession(Size size);

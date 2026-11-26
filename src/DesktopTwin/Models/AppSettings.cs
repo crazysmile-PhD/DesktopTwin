@@ -116,7 +116,7 @@ public sealed record SessionSettings
     public bool AudioMuted { get; init; }
 
     /// <summary>
-    /// 实验性会话内游戏鼠标，默认关闭。切换需重连；捕获与输入接收端随连接存活。
+    /// 实验性会话内游戏鼠标，默认关闭。开关直接启停接收端，不重连 RDP。
     /// </summary>
     public bool RelativeMouseMode { get; init; }
 

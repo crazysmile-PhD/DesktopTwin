@@ -36,6 +36,9 @@ namespace DesktopTwinInputReceiver
                         || server != parent) return 3;
                     var reader = new BinaryReader(pipe);
                     var writer = new BinaryWriter(pipe);
+                    var statusBytes = new byte[RelativeInputProtocol.StatusBytes];
+                    var statusBuffer = new MemoryStream(statusBytes, true);
+                    var statusWriter = new BinaryWriter(statusBuffer);
                     writer.Write(RelativeInputProtocol.Version);
                     writer.Write(session);
                     writer.Write(Process.GetCurrentProcess().Id);
@@ -54,7 +57,9 @@ namespace DesktopTwinInputReceiver
                             Interlocked.Exchange(ref lastPacket, Stopwatch.GetTimestamp());
                             Interlocked.Exchange(ref received, 1);
                             lease.Apply(packet);
-                            ReceiverInput.WriteStatus(writer, session, lease);
+                            statusBuffer.Position = 0;
+                            ReceiverInput.WriteStatus(statusWriter, session, lease);
+                            pipe.Write(statusBytes, 0, statusBytes.Length);
                             if (packet.Operation == InputOperation.Close) return 0;
                         }
                     }
