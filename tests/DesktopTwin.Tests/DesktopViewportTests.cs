@@ -13,6 +13,7 @@ using Microsoft.Xaml.Behaviors;
 
 namespace DesktopTwin.Tests;
 
+[Collection(WindowsDesktopTestGroup.Name)]
 public sealed class DesktopViewportTests
 {
     [Theory]

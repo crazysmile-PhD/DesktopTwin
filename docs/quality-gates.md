@@ -12,6 +12,7 @@
 - `verify-companion-build.ps1` 验证无修改建置不改写代理，强制重建确实重新生成代理且 SHA-256 不变。不以耗时设跨机器门槛；记录的耗时仅供观察。
 - 架构测试限制 Models 对 UI、存储、服务和原生操作的依赖；诊断历史不能依赖窗口或原生操作。所有服务均禁止依赖具体视窗，无豁免。会话端口与 DesktopSessionHost 不能依赖 WPF 或原生控件；会话编排、连接状态机和注销观察还禁止依赖 Windows 实现、注册表和具体自动登录服务。
 - Release 测试必须实际执行、全部通过、零跳过；空或缺少 TRX、运行级清理失败、缺少覆盖率、缺少受保护类型均失败。异步方法生成的状态机也接受覆盖率门槛。
+- 原生桌面、ActiveX 与可见进程夹具使用 `WindowsDesktopTestGroup` 定义的同一集合，隔离共享桌面和 WinForms 状态；保留原有断言与截止时间。纯会话状态、协议和设置测试仍按 xUnit 默认并行执行。[集合并行规则](https://xunit.net/docs/running-tests-in-parallel)
 - `build/coverage-policy.json` 对核心组件分别要求 90–95% 行覆盖率、80–90% 分支覆盖率。SessionConnection、DesktopSessionHost、AccountCredentialStore 与 CredentialDialogWatch 要求 95% 行、90% 分支覆盖率。外部命令另以真实隔离进程验证输出、退出、超时和进程树清理，不宣称已覆盖所有操作系统错误分支。上传的 Cobertura 保留全应用结果，不把核心覆盖率当作全应用覆盖率。
 - 保留 XAML 绑定、资源、常量唯一来源检查。图标改为真实枚举成员精确匹配，程序集不存在时失败。
 - Actions 固定提交 SHA，Dependabot 每周检查 NuGet 和 Actions 更新。两种单文件包都接受锁定还原与分析器检查。

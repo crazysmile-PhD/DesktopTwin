@@ -6,6 +6,7 @@ using DesktopTwin.Services;
 
 namespace DesktopTwin.Tests;
 
+[Collection(WindowsDesktopTestGroup.Name)]
 public sealed class SessionLaunchIntegrationTests : IClassFixture<SessionLaunchFixture>
 {
     private readonly SessionLaunchFixture _fixture;
