@@ -51,8 +51,6 @@ internal sealed class WpfDesktopSessionView : IDesktopSessionView
 internal sealed class RdpSessionClient(RdpActiveXHost host) : IRdpSessionClient
 {
     public int ConnectedState => host.ConnectedState;
-    public bool RelativeMouseModeSettingsAccepted => host.RelativeMouseModeSettingsAccepted;
-    public bool RelativeMouseModeConfiguredEnabled => host.RelativeMouseModeConfiguredEnabled;
     public ChildSessionConnectionFailedEventArgs? LastConnectionDiagnostic => host.LastConnectionDiagnostic;
     public event EventHandler? LoginCompleted
     {
@@ -68,7 +66,6 @@ internal sealed class RdpSessionClient(RdpActiveXHost host) : IRdpSessionClient
     public void SetSmartSizing(bool enabled) => host.SetSmartSizing(enabled);
     public void SetSendSystemShortcutsToRemote(bool enabled) => host.SetSendSystemShortcutsToRemote(enabled);
     public void SetAudioMuted(bool muted) => host.SetAudioMuted(muted);
-    public void SetRelativeMouseMode(bool enabled) => host.SetRelativeMouseMode(enabled);
     public void SetInputBlocked(bool enabled) => host.SetInputBlocked(enabled);
     public void ConnectToChildSession(Size size) => host.ConnectToChildSession(size);
     public void ReconnectToChildSession(Size size) => host.ReconnectToChildSession(size);

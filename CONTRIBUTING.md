@@ -2,7 +2,7 @@
 
 ## 构建与检查
 
-在 Windows 上安装 `global.json` 指定的 .NET SDK。项目使用 WPF、WinForms 和系统 RDP ActiveX；构建目标还会调用 Windows .NET Framework 的编译器生成独立代理。实际运行应用要求管理员权限，纯单元测试不因此获得操作真实会话的授权。
+在 Windows 上安装 `global.json` 指定的 .NET SDK。项目使用 WPF、WinForms 和系统 RDP ActiveX；固定版本的 SDK 编译器使用 Windows .NET Framework 程序集生成独立代理。代理按各自源文件增量编译，启用确定性输出；仍以 Framework 运行，不增加运行时部署依赖。实际运行应用要求管理员权限，纯单元测试不因此获得操作真实会话的授权。
 
 ```powershell
 dotnet restore DesktopTwin.sln --locked-mode
@@ -10,9 +10,10 @@ dotnet build DesktopTwin.sln -c Release -warnaserror
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-xaml.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File build/verify-invariants.ps1
 dotnet test DesktopTwin.sln -c Release --no-build
+pwsh -NoProfile -File build/verify-companion-build.ps1
 ```
 
-四步分别检查编译、XAML 绑定/资源、常量单一来源和测试。工作流定义在 `.github/workflows/build.yml`；其他 fork 需要自行检查 Actions 是否启用，没有运行记录不能写成 CI 通过。
+上述检查包括编译、XAML 绑定/资源、常量单一来源、测试及代理增量/确定性输出。工作流定义在 `.github/workflows/build.yml`；其他 fork 需要自行检查 Actions 是否启用，没有运行记录不能写成 CI 通过。
 
 CI 另有 Debug 测试、recommended 静态分析、复杂度、架构依赖及核心覆盖率门禁。完整复现命令、规则例外与剩余架构债务见 [质量门禁](docs/quality-gates.md)。普通测试成功不代表覆盖率门禁也已通过。
 
@@ -22,7 +23,7 @@ CI 另有 Debug 测试、recommended 静态分析、复杂度、架构依赖及�
 dotnet run --project tests/DesktopTwin.NativeSmoke/DesktopTwin.NativeSmoke.csproj -c Release
 ```
 
-该检查创建自己的未连接控件，调用生产代码反复打开/关闭鼠标属性并回读，不创建、连接或注销子会话。它独立于解决方案单元测试，不是跨 Windows 版本兼容性检查，也不能证明游戏输入正常。
+该检查创建自己的未连接控件，写入旧的原生相对模式后调用生产重设路径，确认两项属性均回到绝对模式，不创建、连接或注销子会话。它独立于解决方案单元测试，不是跨 Windows 版本兼容性检查，也不能证明游戏输入正常。
 
 ## 合并与发布
 

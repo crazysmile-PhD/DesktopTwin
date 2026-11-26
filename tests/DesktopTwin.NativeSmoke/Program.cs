@@ -31,17 +31,21 @@ internal static class Program
             Console.WriteLine("Windows=" + Environment.OSVersion.Version);
             Console.WriteLine("MsTscAx=" + FileVersionInfo.GetVersionInfo(Environment.SystemDirectory + "\\mstscax.dll").FileVersion);
 
-            // Exercise the production pre-connection path, including reuse after toggling.
-            foreach (var enabled in new[] { false, true, true, false, true, false })
+            // Seed stale native state, then exercise the production absolute-input reset.
+            // The game-relative setting belongs to the separate session receiver.
+            foreach (var staleRelative in new[] { false, true, true, false })
             {
-                type.GetMethod("SetRelativeMouseMode", flags)!.Invoke(host, new object[] { enabled });
-                type.GetMethod("ApplyRelativeMouseMode", flags)!.Invoke(host, new[] { client, advanced });
-                var accepted = (bool)type.GetProperty("RelativeMouseModeSettingsAccepted", flags)!.GetValue(host)!;
+                object stale = staleRelative;
+                extended.Set("AllowRelativeMouseMode", ref stale);
+                advanced.GetType().InvokeMember("RelativeMouseMode", BindingFlags.SetProperty,
+                    null, advanced, new object[] { staleRelative }, CultureInfo.InvariantCulture);
+                type.GetMethod("ApplyAbsoluteMouseMode", flags)!.Invoke(host, new[] { client, advanced });
+                var accepted = (bool)type.GetProperty("AbsoluteMouseModeResetAccepted", flags)!.GetValue(host)!;
                 var allow = Convert.ToBoolean(extended.Get("AllowRelativeMouseMode"), CultureInfo.InvariantCulture);
                 var relative = Convert.ToBoolean(advanced.GetType().InvokeMember("RelativeMouseMode",
                     BindingFlags.GetProperty, null, advanced, null, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
-                Console.WriteLine($"Requested={enabled}; Accepted={accepted}; AllowRelativeMouseMode={allow}; RelativeMouseMode={relative}");
-                if (!accepted || allow != enabled || relative != enabled)
+                Console.WriteLine($"StaleRelative={staleRelative}; ResetAccepted={accepted}; AllowRelativeMouseMode={allow}; RelativeMouseMode={relative}");
+                if (!accepted || allow || relative)
                     throw new InvalidOperationException("Production configuration and native readback disagree.");
             }
 

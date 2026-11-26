@@ -75,6 +75,9 @@ jobs:
       - name: 发布门禁：已登记的重构契约
         run: ./build/verify-release-gates.ps1 -ResultsDirectory artifacts/test-results
 
+      - name: 代理增量建置与确定性输出
+        run: ./build/verify-companion-build.ps1
+
       - name: 上传测试及完整应用覆盖率报告
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -83,6 +86,7 @@ jobs:
           path: |
             artifacts/test-results
             artifacts/debug-test-results
+            artifacts/companion-build
           if-no-files-found: error
           retention-days: 14
 

@@ -49,9 +49,9 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 
 连接配置的目标固定为 `127.0.0.1`，并设置 `ConnectToChildSession`。本机图形优化由 `RdpLocalGraphicsOptions` 在连接前分别尝试；失败不会阻断必要设置。控件返回成功不等于图形路径已协商成功。
 
-实验性相对鼠标由 `SessionSettings.RelativeMouseMode` 保存，默认关闭。`RdpRelativeMouseOptions` 先允许 `AllowRelativeMouseMode`，再请求 `AdvancedSettings7.RelativeMouseMode`；任何一步不受支持，就尽力将两项复位为 false，继续连接并报告未完整接受。关闭时也显式复位两项，避免复用控件时遗留上一连接的模式。反射包装的 COM 错误同样按可选属性处理，程序错误不静默吞掉。
+实验性相对鼠标由 `SessionSettings.RelativeMouseMode` 保存，默认关闭，由独立的会话内接收端处理。原生 RDP 始终保持绝对坐标；`RdpAbsoluteMouseOptions` 在连接前尽力将两项原生相对模式属性复位为 false，不再尝试启用或在登录后重新启用原生相对模式。不支持的可选属性不阻断普通连接，程序错误不静默吞掉。
 
-鼠标设置通过 `ChildSessionService` 的既有设置重连入口合并，并沿用代际取消、注销与超时边界。登录完成后界面报告设置是否被接受；`OnMouseInputModeChanged` 仅记录控件报告的模式，不把属性接受或回调当成游戏兼容证明。原生控件负责鼠标输入与焦点，本功能不安装额外钩子、不自行锁定或隐藏本机光标、不经代理注入输入。[RelativeMouseMode](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpclientadvancedsettings6-relativemousemode)、[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)、[模式回调](https://learn.microsoft.com/en-us/windows/win32/termserv/imstscaxevents-onmouseinputmodechanged)。
+鼠标开关直接发布状态，`RelativeInputController` 据此启动或关闭接收端，不创建视窗、不触发 RDP 设置重连。关闭后重新开启可重试失败的接收端。就绪通知只来自接收端握手；原生属性接受与模式回调不作为游戏输入成功证据。普通键鼠仍由 RDP 处理，捕获时的 Raw Input、光标限制及会话内 `SendInput` 由下文的输入通道负责。[RelativeMouseMode](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpclientadvancedsettings6-relativemousemode)、[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)。
 
 启动任务通过 `TaskCompletionSource` 等待登录完成回调，单次尝试预算 60 秒。首次连接错误最多自动重试一次，延迟 4 秒。超时本身不触发这一轮重试。设置重连保留最多三次服务层重试，延迟 2/4/8 秒；控件还会先等 1 秒及最多 10 秒会话释放。这些预算不是“整次操作只需几秒”的保证。
 
@@ -73,7 +73,11 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 
 游戏相对输入由 `RelativeInputController` 持有：前台、控制模式、画面内指针和远端隐藏光标共同决定捕获。捕获期间对子窗口原生输入进行替换，只发送 Raw Input 位移；普通坐标继续由 RDP 处理。Raw Input 的注册仅有一个进程内所有者，退出捕获时有条件恢复原注册；失焦释放自己的 ClipCursor，不覆盖其他应用取得的限制。
 
+控制器订阅现有会话状态与窗口激活/可见性事件。仅在功能启用、已登录、接收端就绪且视窗处于前台控制状态时运行 32ms 捕获检查；停用、隐藏、最小化、失焦、观看模式与启动等待均停止该计时器。子会话身份复用服务的采样结果，不再随捕获检查重复查询 WTS。
+
 `RelativeInputSession` 持有一个当前用户、同提升级别的管道，核对接收端 PID、路径、用户和会话。接收端为嵌入的 Framework 小程序，通过既有临时任务/启动代理进入会话；先查验任务删除再创建接收端。无窗口创建回执只证明进程创建，随后必须完成接收端自己的握手。启动确认期间发送未授权心跳，避免首次确认延迟耗尽活动输入租约。主 UI 的授权 250ms 过期；接收端活动心跳 1500ms 超时即关闭并释放输入。队列有界，仅合并相邻移动，按钮和按键保持顺序，过载断开而不静默丢弃释放。
+
+UI 的连续采样只续租，授权改变才唤醒通道，不重复排队 Reset。无授权时最多每 250ms 交换状态；前台空闲时每 50ms 交换状态，已有输入交换会延后重复心跳。收发仍只有一个串行所有者，复用编解码缓冲和一次性超时来源；保留逐笔确认与既有协议。接收端一次写出完整 36-byte 状态，避免八次碎片写入。此选择优先保留简单的顺序和取消语义，没有增加双向后台循环或批次协议。
 
 此通道不创建自启项、不安装驱动，也没有任意程序或脚本命令。`InputLease` 在撤销、断线与退出时释放已注入的键/按钮；菜单释放指针按钮而保留诊断端按住的 Alt。API 测试的位移和键可进入同一会话内通道；硬件捕获仍须额外实测。实现参考 [RDPRelativeInput](https://github.com/TKMAX777/RDPRelativeInput)、[Moonlight](https://github.com/moonlight-stream/moonlight-qt/tree/master/app/streaming/input) 与 [GamingAnywhere 5.1.5](https://chuang.zoolab.org/pubs/pdf/2013mmsys.pdf)，以 C# 独立实现；没有引入其二进制或驱动。
 
@@ -85,7 +89,7 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 - 目标程序启动的任务计划程序 COM 调用放到后台。启动排队受会话 token 取消，下发前复查会话身份。
 - `PerformanceTrace` 使用单调时钟记录阶段耗时；App 创建至首帧不包含此前的单文件解压、运行时加载或 UAC 等待。自带运行时单文件不启用程序集压缩，避免每次加载时的解压工作；它仍可能释放本机库，不等于完全无解包。
 
-启动代理源码位于 `src/SessionLaunchWorker/`，构建时用 Windows .NET Framework 编译器生成独立 `DesktopTwin.LaunchWorker.exe` 并嵌入主程序。代理只接受一次性 `--launch-worker` 请求，完成或断开后退出，没有热键、心跳、文件监视或常驻模式。
+启动代理源码位于 `src/SessionLaunchWorker/`，由固定 SDK 的编译器引用系统 Framework 程序集生成独立 `DesktopTwin.LaunchWorker.exe` 并嵌入主程序。两个代理分别按输入增量编译并启用确定性输出。代理只接受一次性 `--launch-worker` 请求，完成或断开后退出，没有热键、心跳、文件监视或常驻模式。
 
 升级清理 `LegacyUuAgentCleanup` 在首帧后运行，删除旧热键代理自启项及固定名称的遗留文件。停止进程前核对完整路径，只处理当前用户数据目录中的 `DesktopTwin.Agent.exe` 或其 `.old` 文件，保留一次性启动代理和其他路径的同名进程。旧版任务前缀仍仅用于清扫历史任务。
 

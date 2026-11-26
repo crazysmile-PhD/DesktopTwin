@@ -29,7 +29,6 @@ internal sealed class DesktopSessionHost(
             view.RdpHost.SetSmartSizing(settings.SmartSizing);
             view.RdpHost.SetSendSystemShortcutsToRemote(settings.SendSystemShortcutsToRemote);
             view.RdpHost.SetAudioMuted(settings.AudioMuted);
-            view.RdpHost.SetRelativeMouseMode(settings.RelativeMouseMode);
         }
         catch (Exception configurationError)
         {

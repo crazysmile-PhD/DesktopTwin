@@ -192,9 +192,6 @@ public sealed class ChildSessionService : IDisposable
     /// </summary>
     public event EventHandler? AudioReconnectCompleted;
 
-    /// <summary>登录完成后报告鼠标设置的接受情况，包括初次连接与设置重连。</summary>
-    public event EventHandler? RelativeMouseModeConfigured;
-
     /// <summary>
     /// 因为目标程序要求管理员权限，自动启动被跳过，需要用户手动确认。
     /// </summary>
@@ -253,16 +250,8 @@ public sealed class ChildSessionService : IDisposable
     /// </summary>
     public bool AudioMuted => _settings.Current.Session.AudioMuted;
 
-    /// <summary>是否请求实验性原生相对鼠标。</summary>
+    /// <summary>是否启用独立的会话内游戏鼠标。</summary>
     public bool RelativeMouseModeEnabled => _settings.Current.Session.RelativeMouseMode;
-
-    /// <summary>最近一次连接的鼠标设置是否被控件接受，不代表游戏输入已验证。</summary>
-    public bool RelativeMouseModeSettingsAccepted =>
-        _desktopHost.Current?.RdpHost.RelativeMouseModeSettingsAccepted == true;
-
-    /// <summary>最近一次连接配置时请求的鼠标模式，不含尚未应用的排队设置。</summary>
-    internal bool RelativeMouseModeConfiguredEnabled =>
-        _desktopHost.Current?.RdpHost.RelativeMouseModeConfiguredEnabled == true;
 
     /// <summary>
     /// 是否处于观看模式。
@@ -758,24 +747,18 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 切换实验性相对鼠标，沿用既有的有界设置重连流程。
+    /// 切换独立的会话内输入接收端；不改变 RDP 连接或图形配置。
     /// </summary>
-    /// <returns>是否触发了自动重连。</returns>
-    public bool SetRelativeMouseMode(bool enabled)
+    public void SetRelativeMouseMode(bool enabled)
     {
         ThrowIfDisposed();
         if (RelativeMouseModeEnabled == enabled)
         {
-            return false;
+            return;
         }
 
         _settings.Update(s => s with { Session = s.Session with { RelativeMouseMode = enabled } });
-        var window = EnsureDesktopWindow();
-        window.RdpHost.SetRelativeMouseMode(enabled);
-        return ReconnectForRdpSettingChange(
-            window,
-            RdpSettingChange.RelativeMouse,
-            enabled ? Locale.Get("Svc.Status.RelativeMouseOn") : Locale.Get("Svc.Status.RelativeMouseOff"));
+        RefreshState(enabled ? Locale.Get("Svc.Status.RelativeMouseOn") : Locale.Get("Svc.Status.RelativeMouseOff"));
     }
 
     /// <summary>
@@ -1537,11 +1520,6 @@ public sealed class ChildSessionService : IDisposable
             RefreshState(Locale.Get("Svc.Status.LoginInitialized"));
         }
 
-        if (RelativeMouseModeEnabled || completedSettingChanges.HasFlag(RdpSettingChange.RelativeMouse))
-        {
-            RelativeMouseModeConfigured?.Invoke(this, EventArgs.Empty);
-        }
-
         if (!_autoLaunchPending)
         {
             return;
@@ -1943,7 +1921,6 @@ public sealed class ChildSessionService : IDisposable
         None = 0,
         SystemShortcuts = 1,
         Audio = 2,
-        Resolution = 4,
-        RelativeMouse = 8
+        Resolution = 4
     }
 }

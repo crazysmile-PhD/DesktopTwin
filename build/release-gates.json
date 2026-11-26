@@ -6,8 +6,9 @@
       "DesktopTwin.Tests.DesktopViewportTests.ResizeAndResolutionChangesPreserveWindowPlacement",
       "DesktopTwin.Tests.DesktopViewportTests.NativeRdpControlReceivesTheFittedRectangleWithoutConnecting",
       "DesktopTwin.Tests.DesktopViewportTests.NativeControlKeepsItsOriginAndBoundsAcrossAspectAndInternalSizeChanges",
-      "DesktopTwin.Tests.RdpRelativeMouseOptionsTests.LoginRestoresModeAfterConnectionResetsThePreconnectionValue",
-      "DesktopTwin.Tests.RdpRelativeMouseOptionsTests.LoginReadbackDoesNotTreatAcceptedWriteAsRelativeInputEvidence",
+      "DesktopTwin.Tests.RdpAbsoluteMouseOptionsTests.ReceiverOwnsRelativeMotionAndNativeRdpAlwaysResetsBothProperties",
+      "DesktopTwin.Tests.RdpAbsoluteMouseOptionsTests.UnsupportedOptionalPropertyDoesNotSkipTheOtherReset(failMode: False)",
+      "DesktopTwin.Tests.RdpAbsoluteMouseOptionsTests.UnsupportedOptionalPropertyDoesNotSkipTheOtherReset(failMode: True)",
       "DesktopTwin.Tests.SettingsServiceTests.升级时恢复可读的自动分辨率且不再自动进入旧小窗"
     ]
   },
@@ -87,7 +88,20 @@
       "DesktopTwin.Tests.SettingsServiceTests.FailedUpdateLeavesThePublishedSnapshotIntact",
       "DesktopTwin.Tests.SettingsServiceTests.DeferredSavePersistsTheLatestChange",
       "DesktopTwin.Tests.SettingsServiceTests.UpdateAfterDisposeDoesNotPublishOrScheduleSave",
-      "DesktopTwin.Tests.SettingsServiceTests.PreviouslyDamagedHistoryIsRepairedAndPersisted"
+      "DesktopTwin.Tests.SettingsServiceTests.PreviouslyDamagedHistoryIsRepairedAndPersisted",
+      "DesktopTwin.Tests.SettingsServiceTests.FailedFlushReportsErrorAndPreservesTheSnapshotForExit",
+      "DesktopTwin.Tests.SettingsServiceTests.FailedDeferredSaveRetainsTheLatestSnapshotForExit"
+    ]
+  },
+  "INPUT002": {
+    "description": "Reusable input transport preserves ordered frames, rejects invalid replies and keeps timeout, cancellation and stream ownership bounded.",
+    "tests": [
+      "DesktopTwin.Tests.RelativeInputTransportTests.ReusedBuffersPreserveInputOrderAndReadFragmentedStatus",
+      "DesktopTwin.Tests.RelativeInputTransportTests.WrongSessionOrInvalidStatusFailsTheExchange(session: 18, error: 0)",
+      "DesktopTwin.Tests.RelativeInputTransportTests.WrongSessionOrInvalidStatusFailsTheExchange(session: 17, error: 1)",
+      "DesktopTwin.Tests.RelativeInputTransportTests.PartialStatusAndPeerDisconnectCannotBeReportedAsSuccess",
+      "DesktopTwin.Tests.RelativeInputTransportTests.MissingReplyTimesOutAndCannotRenewACanceledTransport",
+      "DesktopTwin.Tests.RelativeInputTransportTests.CallerCancellationStopsTheExchangeButCodecDisposalDoesNotOwnThePipe"
     ]
   },
   "PROC001": {

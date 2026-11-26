@@ -39,6 +39,16 @@
 
 不要从这一行日志推断已经共享内存、使用了哪个编解码器、完全没有拷贝或能达到固定刷新率。需要结合实际会话、CPU/GPU 活动和输出帧时间验证。
 
+## 减少工作量的实现选择
+
+游戏鼠标是独立输入通道，切换开关无须重连 RDP。捕获检查只在前台控制且接收端就绪时运行；后台、停用与启动等待不运行该计时器。窗口事件驱动启停，复用会话服务的身份采样，减少重复 WTS 查询。[Windows 能效指南](https://learn.microsoft.com/en-us/windows/apps/performance/power) 建议优先减少背景工作与计时器唤醒。
+
+保留有界队列和相邻位移合并，按钮与键盘顺序不变。单一串行收发者复用编解码缓冲和超时来源，接收端一次写出完整状态；输入交换已提供活动与光标证据时不再附加心跳。[Moonlight 的输入实现](https://github.com/moonlight-stream/moonlight-common-c/blob/master/src/InputStream.c) 同样区分可合并移动与必须保序的状态变化。本项目仍保留现有逐笔确认，没有为微基准另建并行通道或批次协议。
+
+代理使用固定 SDK 编译器及 Framework 程序集，按各自源文件增量编译并启用确定性输出。[MSBuild 增量建置](https://learn.microsoft.com/en-us/visualstudio/msbuild/incremental-builds) 与 [Csc 的 Deterministic 选项](https://learn.microsoft.com/en-us/visualstudio/msbuild/csc-task) 是此处的依据。CI 自动验证无修改时不重编代理、强制重建时相同输入仍生成相同字节，不使用硬件相关的毫秒数作为门禁。
+
+这些措施减少喚醒、I/O、配置与编译工作，不等于已测得整机省电比例。输入微基准须记录实际加载的 DLL SHA-256、运行时、单/跨进程、样本数与原始结果；不能换算成真实游戏端到端延迟或 FPS。
+
 ## 当前证据边界
 
 回归测试覆盖异步控制、旧任务失效、图形属性不支持时继续连接等行为；它们不包含真实游戏负载、显卡矩阵或端到端输入延迟。仓库暂不提供量化性能承诺。提交性能反馈时请附上比较条件和原始测量，而不是只报告“感觉像模拟器”。
