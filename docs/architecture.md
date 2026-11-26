@@ -11,8 +11,11 @@
 | `DesktopSessionHost` | 延迟创建一个视窗，配置初值、转发事件并负责关闭前解除订阅 |
 | `AccountCredentialStore` | 无平台依赖的账户密码策略，使用注入的保护函数、快照读取和原子更新；发布不可变密文表 |
 | `TrayIconController` | 托盘菜单与具体窗口的呈现交互，属于 View 层 |
-| `ChildSessionService` | 子会话连接、注销、设置重连、状态发布 |
-| `RdpActiveXHost` | MsRdpClient10 COM 配置、回调和控件层排队重连 |
+| `ChildSessionService` | 通过注入的依赖编排启动、注销、程序启动与状态发布 |
+| `SessionConnection` | 唯一的连接阶段、重连合并、重试预算和截止时间所有者 |
+| `IChildSessionPlatform` / `WindowsChildSessionPlatform` | Windows 会话、预检、服务与程序启动操作的边界和生产适配器 |
+| `ISessionDispatcher` / `WpfSessionDispatcher` | 将状态转换及控件命令串行调度到宿主 UI 线程 |
+| `RdpActiveXHost` | MsRdpClient10 COM 配置、连接/断开命令及原生回调 |
 | `DesktopViewport` | 按桌面分辨率在可用区域内等比居中安排原生 RDP 宿主，窗口与全屏共用布局 |
 | `ChildSessionProcessLauncher` / `SessionLaunchWorker` | 临时任务只引导独立启动代理进入指定会话；清理后授权启动并核对回执 |
 | `ChildSessionEnvironmentCheck` / `EnvironmentFixer` | 诊断采集与显式系统修复 |
@@ -25,7 +28,7 @@
 
 App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 `IDesktopSessionView`、`IRdpSessionClient`，不创建或引用具体窗口和 ActiveX 控件。视窗配置失败会关闭部分创建的视窗，重试时重新创建；关闭前先解除事件订阅。
 
-架构测试禁止任何服务依赖具体窗口，没有豁免名单；契约和 DesktopSessionHost 也不能依赖 WPF 或 Interop。服务层仍使用 UI Dispatcher 调度和 WTS 平台接口，连接重试也仍分布在服务和控件两层。ViewModel 通过幂等 `Dispose` 释放资源；WPF 窗口在关闭时调用。发布门禁和后续拆分见 [质量门禁](quality-gates.md)。
+架构测试禁止任何服务依赖具体窗口，没有豁免名单；契约和 DesktopSessionHost 也不能依赖 WPF 或 Interop。会话编排、连接状态机和注销观察不依赖 WPF、Interop、注册表或具体自动登录实现。App 显式注入 Windows 平台适配器、UI 调度器、`TimeProvider` 与借用的凭据端口；ViewModel 独立接收 App 拥有的自动登录服务。平台端口只返回不可变的预检摘要与阻塞结论，不向编排暴露诊断实现类型。ViewModel 通过幂等 `Dispose` 释放资源；WPF 窗口在关闭时调用。发布门禁见 [质量门禁](quality-gates.md)。
 
 ## 画面布局
 
@@ -43,7 +46,7 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 
 ## 连接
 
-`StartAsync` 切回 UI Dispatcher，同一启动代际内共用未完成的启动任务。请求先校验代际，再决定是否共用。已有且实际活动的连接直接返回；已有会话的重连复用预检结果，新建会话前的近期预检快照可复用 30 秒。
+`StartAsync` 经注入的调度器进入宿主线程，同一启动代际内共用未完成的启动任务。请求先校验代际，再决定是否共用；启动任务引用只在该线程写入，不再另建后台清理任务和配套锁。已有且实际活动的连接直接返回；已有会话的重连复用预检结果，新建会话前的近期预检快照可复用 30 秒。
 
 `CollectForConnection` 与完整 `Collect` 共用全部阻塞检查及廉价提示，但连接路径不等待计划任务、启动项扫描或触发 sfc 完整性验证。完整诊断保留在诊断面板；未做完整扫描不表示环境已全面验证。残留临时任务的后台清扫推迟到主窗口首帧之后。
 
@@ -53,19 +56,23 @@ App 提供视窗工厂并保留具体 MainWindow 引用。会话服务只使用 
 
 鼠标开关直接发布状态，`RelativeInputController` 据此启动或关闭接收端，不创建视窗、不触发 RDP 设置重连。关闭后重新开启可重试失败的接收端。就绪通知只来自接收端握手；原生属性接受与模式回调不作为游戏输入成功证据。普通键鼠仍由 RDP 处理，捕获时的 Raw Input、光标限制及会话内 `SendInput` 由下文的输入通道负责。[RelativeMouseMode](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpclientadvancedsettings6-relativemousemode)、[扩展属性](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpextendedsettings-property)。
 
-启动任务通过 `TaskCompletionSource` 等待登录完成回调，单次尝试预算 60 秒。首次连接错误最多自动重试一次，延迟 4 秒。超时本身不触发这一轮重试。设置重连保留最多三次服务层重试，延迟 2/4/8 秒；控件还会先等 1 秒及最多 10 秒会话释放。这些预算不是“整次操作只需几秒”的保证。
+`SessionConnection` 的阶段只有空闲、等待断开、等待会话释放、连接中、重试退避。连接操作持有一个完成信号和一个当前计时器。首次连接错误最多重试一次，退避 4 秒；设置重连错误最多重试三次，退避 2/4/8 秒。断开观察与登录等待各自最多 60 秒，会话释放最多 10 秒；超时直接结束该操作，不启动新一轮重试。这些阶段预算不是整次操作的总耗时保证。
 
-设置重连也为每次实际尝试记录 60 秒截止时间。UI 状态采样发现回调缺失且预算到期时，会作废控件排队重连并报告超时；退避等待期间不使用上一轮截止时间，下一次尝试重新计时。待应用设置保留给下次显式连接。
+重连先发出断开，随后每 200ms 检查控件状态与会话活动状态，条件满足立即连接；删除控件里的固定 1 秒延迟及排队重连。等待期间连续修改设置只合并意图，实际连接时读取最新尺寸和配置；已经进入连接的修改会取消当前尝试并重新应用。成功后才发布对应设置完成事件；失败或超时保留待应用设置供下次显式连接使用。凭据弹窗监听只在状态机拥有的登录阶段开启，断开、会话释放和退避期间停止，避免控件残留的连接中状态重新挂上监听。
+
+每次阶段转换都会处置旧计时器并推进回调版本，已排入 UI 队列的旧回调也不能影响新操作。退避不沿用上一轮连接的截止时间，下一轮登录重新计时；回调缺失不再依赖 500ms 状态采样来判断超时。时间通过 [.NET TimeProvider](https://learn.microsoft.com/en-us/dotnet/standard/datetime/timeprovider-overview) 注入，测试推进虚拟时间，不创建 WPF Dispatcher、不等待真实退避，也不反射修改私有状态。
+
+ActiveX 的 [EnableAutoReconnect](https://learn.microsoft.com/en-us/windows/win32/termserv/imsrdpclientadvancedsettings2-enableautoreconnect) 默认开启；连接前显式关闭，并在 [OnAutoReconnecting](https://learn.microsoft.com/en-us/windows/win32/termserv/-imstscaxevents--onautoreconnecting) 返回停止，防止原生重试绕过统一预算。已登录连接意外断开时发布失败，由用户重新启动。未连接原生冒烟检查会读回该属性；替身测试不证明真实子会话释放和再连接已在所有 Windows 版本验证。
 
 启动入口在已有连接时同时参考 ActiveX 连接状态和 WTS 会话活动状态。
 
 ## 取消与注销
 
-`StartGeneration` 使旧启动、首次重试及设置重试无法写回新操作。注销/释放还取消捕获的会话生命周期 token。
+`StartGeneration` 使旧预检与排队启动无法写回新操作；连接计时器版本隔离旧回调。注销/释放还取消捕获的会话生命周期 token，撤销排队的程序启动而不等待正在执行的外部 COM 收尾。
 
 注销先校验会话号、撤销旧意图，不等待程序启动占用的 COM 信号量。重复请求共用同一次注销。`SessionLogoffOperation` 区分请求接受与实际完成：WTS 注销使用 `wait: false`，普通注销/关闭系统功能随后异步观察最多 15 秒；窗口关闭及托盘退出只等待请求接受。退出期间仍阻止重新连接，释放资源时不重复下发已接受的注销。进程退出不证明 Windows 已完成清理；超时也只表示程序未确认完成。接口语义见 [WTSLogoffSession](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtslogoffsession)。
 
-取消是协作式的。已经进入系统或外部 COM 的调用不一定能被 token 中止；代码不会把“调用方不再等待”当成“底层操作已经结束”。退出时仍尽力请求注销子会话。
+取消是协作式的。已经进入系统或外部 COM 的调用不一定能被 token 中止；代码不会把“调用方不再等待”当成“底层操作已经结束”。非正常关闭入口的 Dispose 兜底仍等注销请求下发，避免请求尚未在线程池执行时进程已退出；它不等待 Windows 清理完成。
 
 ## 后台工作与状态
 

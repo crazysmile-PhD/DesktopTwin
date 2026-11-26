@@ -7,22 +7,22 @@ public sealed class SessionLogoffOperationTests
     [Fact]
     public async Task ExitCanFinishAfterRequestWhileWindowsIsStillCleaningUp()
     {
-        var request = new TaskCompletionSource<uint?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var request = Task.FromResult<uint?>(17);
+        var time = new ManualSessionTime();
         var currentSession = 17;
-        var operation = new SessionLogoffOperation(request.Task, () =>
+        var operation = new SessionLogoffOperation(request, () =>
         {
             var current = Volatile.Read(ref currentSession);
             return current < 0 ? null : (uint?)current;
         },
-            TimeSpan.FromSeconds(5), CancellationToken.None);
+            TimeSpan.FromSeconds(5), time, CancellationToken.None);
 
-        Assert.False(operation.Request.IsCompleted);
         Assert.False(operation.Completion.IsCompleted);
-        request.SetResult(17);
         Assert.Equal((uint?)17, await operation.Request.WaitAsync(TimeSpan.FromSeconds(2)));
         Assert.False(operation.Completion.IsCompleted);
 
         Volatile.Write(ref currentSession, -1);
+        time.Advance(TimeSpan.FromMilliseconds(200));
         await operation.Completion.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
@@ -32,7 +32,7 @@ public sealed class SessionLogoffOperationTests
         var failure = new InvalidOperationException("request rejected");
         var operation = new SessionLogoffOperation(Task.FromException<uint?>(failure),
             () => throw new InvalidOperationException("must not query after rejected request"),
-            TimeSpan.FromSeconds(5), CancellationToken.None);
+            TimeSpan.FromSeconds(5), new ManualSessionTime(), CancellationToken.None);
 
         Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => operation.Request));
         Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => operation.Completion));
@@ -43,7 +43,7 @@ public sealed class SessionLogoffOperationTests
     {
         var operation = new SessionLogoffOperation(Task.FromResult<uint?>(null),
             () => throw new InvalidOperationException("must not query without a session"),
-            TimeSpan.FromSeconds(5), CancellationToken.None);
+            TimeSpan.FromSeconds(5), new ManualSessionTime(), CancellationToken.None);
         await operation.Completion.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
@@ -51,7 +51,7 @@ public sealed class SessionLogoffOperationTests
     public async Task ReplacementSessionIsNotWaitedOn()
     {
         var operation = new SessionLogoffOperation(Task.FromResult<uint?>(17), () => 18,
-            TimeSpan.FromSeconds(5), CancellationToken.None);
+            TimeSpan.FromSeconds(5), new ManualSessionTime(), CancellationToken.None);
         await operation.Completion.WaitAsync(TimeSpan.FromSeconds(2));
     }
 
@@ -59,7 +59,7 @@ public sealed class SessionLogoffOperationTests
     public async Task CompletionObservationHasABoundedTimeout()
     {
         var operation = new SessionLogoffOperation(Task.FromResult<uint?>(17), () => 17,
-            TimeSpan.Zero, CancellationToken.None);
+            TimeSpan.Zero, new ManualSessionTime(), CancellationToken.None);
         await Assert.ThrowsAsync<TimeoutException>(() => operation.Completion);
         Assert.True(operation.Request.IsCompletedSuccessfully);
     }
@@ -69,7 +69,7 @@ public sealed class SessionLogoffOperationTests
     {
         using var cancellation = new CancellationTokenSource();
         var operation = new SessionLogoffOperation(Task.FromResult<uint?>(17), () => 17,
-            TimeSpan.FromSeconds(5), cancellation.Token);
+            TimeSpan.FromSeconds(5), new ManualSessionTime(), cancellation.Token);
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation.Completion);
         Assert.Equal((uint?)17, await operation.Request);

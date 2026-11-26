@@ -31,6 +31,15 @@ internal static class Program
             Console.WriteLine("Windows=" + Environment.OSVersion.Version);
             Console.WriteLine("MsTscAx=" + FileVersionInfo.GetVersionInfo(Environment.SystemDirectory + "\\mstscax.dll").FileVersion);
 
+            // Exercise the production reconnect policy on this unconnected native control.
+            advanced.GetType().InvokeMember("EnableAutoReconnect", BindingFlags.SetProperty,
+                null, advanced, new object[] { true }, CultureInfo.InvariantCulture);
+            type.GetMethod("ApplyReconnectPolicy", BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, new[] { advanced });
+            var autoReconnect = Convert.ToBoolean(advanced.GetType().InvokeMember("EnableAutoReconnect",
+                BindingFlags.GetProperty, null, advanced, null, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+            Console.WriteLine($"EnableAutoReconnect={autoReconnect}");
+            if (autoReconnect) throw new InvalidOperationException("Native reconnect must be owned by the session lifecycle.");
+
             // Seed stale native state, then exercise the production absolute-input reset.
             // The game-relative setting belongs to the separate session receiver.
             foreach (var staleRelative in new[] { false, true, true, false })

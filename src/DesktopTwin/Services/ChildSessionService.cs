@@ -7,8 +7,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Threading;
-using DesktopTwin.Interop;
 using DesktopTwin.Models;
 using DesktopTwin.Contracts;
 using DrawingSize = System.Drawing.Size;
@@ -23,38 +21,15 @@ namespace DesktopTwin.Services;
 /// </summary>
 public sealed class ChildSessionService : IDisposable
 {
-    private static readonly TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
-
-    /// <summary>
-    /// 连接失败后等多久再试一次。
-    ///
-    /// 凭据被拒时 Windows 会直接把 RDP 断开，只有重新连接才会再次弹出凭据框，
-    /// 所以「再给用户一次机会」在实现上就是「等几秒重连一次」。
-    /// 4 秒给用户留出看清提示、重新输入的时间。
-    /// </summary>
-    private static readonly TimeSpan ConnectionRetryDelay = TimeSpan.FromSeconds(4);
-
-    /// <summary>
-    /// 一次启动最多再重试几次。
-    ///
-    /// 只留 1 次：每次重试都会再试一次密码，失败一次就消耗一次账户的锁定配额
-    /// （默认阈值 10 次）。两次足够覆盖手滑，再多就是在拿用户账户冒险。
-    /// </summary>
-    private const int ConnectionRetryCount = 1;
-
-    /// <summary>
-    /// 设置切换后的自动重连次数。
-    ///
-    /// 断开之后立刻重连，经常被 RDS 用「访问被拒绝」顶回来（日志里几乎每次都复现），
-    /// 隔几秒再连就能成功。重试不够时，用户看到的是「第一次必定失败、手动再点一次才行」，
-    /// 所以这里给足三次（2s / 4s / 8s）。
-    /// </summary>
-    private const int RdpSettingsReconnectRetryCount = 3;
     private const int ErrorTimeout = 1460;
 
     private readonly SettingsService _settings;
-    private readonly AutoLoginService? _autoLogin;
-    private readonly DispatcherTimer _statusTimer;
+    private readonly ISessionAutoLogin? _autoLogin;
+    private readonly IChildSessionPlatform _platform;
+    private readonly ISessionDispatcher _dispatcher;
+    private readonly TimeProvider _timeProvider;
+    private readonly SessionConnection _connection;
+    private readonly ITimer _statusTimer;
     private readonly SemaphoreSlim _launchSemaphore = new(1, 1);
 
     /// <summary>
@@ -70,13 +45,6 @@ public sealed class ChildSessionService : IDisposable
     /// 新的启动不能去等那个注定不连接的旧任务，否则用户按下启动却什么也没发生。
     /// </summary>
     private int _startOperationGeneration = -1;
-
-    /// <summary>
-    /// 保护 <see cref="_startOperation"/> 的赋值与清除：两者可能在不同线程上
-    /// （清理由 await 的续体在池线程执行），不加锁会用一个「清空」把刚赋上的新任务抹掉，
-    /// 下一次启动于是又各跑一遍预检、又发一次连接尝试。
-    /// </summary>
-    private readonly object _startOperationGate = new();
 
     /// <summary>
     /// 环境预检的代际：后开始的那一轮才算数，慢扫描不会把更新的结论盖回旧值。
@@ -113,58 +81,22 @@ public sealed class ChildSessionService : IDisposable
     /// </summary>
     private bool _windowHiddenByUser;
 
-    /// <summary>
-    /// 创建服务时所在的 UI 线程调度器。
-    ///
-    /// 视角切换里多处 await 用了 ConfigureAwait(false)，等到需要操作 RDP 控件时
-    /// 已经在线程池上了；WPF 对象只认创建它的线程，直接碰就是
-    /// 「调用线程无法访问此对象，因为另一个线程拥有该对象」。
-    /// 涉及 UI 的入口统一用它切回去。
-    /// </summary>
-    private readonly Dispatcher _dispatcher = Dispatcher.CurrentDispatcher;
-
     private readonly DesktopSessionHost _desktopHost;
     private bool _autoLaunchPending;
-    private TaskCompletionSource<bool>? _connectionAttemptCompletionSource;
-    private ChildSessionConnectionFailedEventArgs? _lastConnectionFailure;
-    private int _initialConnectionRetriesRemaining;
-    private bool _connectionRetryInProgress;
 
-    /// <summary>
-    /// 当前这一次连接尝试的超时截止时刻（<see cref="Environment.TickCount64"/>）。
-    /// 重试会重新计算，否则总超时会把刚开始的重试直接掐掉。
-    /// </summary>
-    private long _attemptDeadlineTick;
+    private ChildSessionConnectionFailedEventArgs? _lastConnectionFailure;
 
     /// <summary>
     /// 最近一次连接失败像是「凭据被拒」。成功登录或开始新一轮尝试时清掉。
     /// </summary>
     private bool _credentialFailureSuspected;
 
-    /// <summary>
-    /// 本轮尝试是否不自动填凭据弹窗。
-    ///
-    /// 重试的唯一目的是让用户自己再输一次密码，自动填会把同一份密码再提交一遍——
-    /// 错的还是错，只是又消耗一次失败登录。注意只关「填弹窗」这一路，
-    /// 直接交给 RDP 的凭据（<see cref="ProvideAutoLoginCredential"/>）保持不动。
-    /// </summary>
-    private bool _suppressCredentialDialogFill;
     private RdpSettingChange _pendingRdpSettingChanges;
 
-    /// <summary>
-    /// 设置重连重试的代际号。切到主桌面时自增，让还在 <c>Task.Delay</c> 里等的
-    /// 那次重试作废——否则它醒来后会把刚断开的分身又连回来。
-    /// 只作废这一次重试，不清 <see cref="_pendingRdpSettingChanges"/>：
-    /// 待应用的设置要留给下一次成功登录去收尾。
-    /// </summary>
-    private int _settingsReconnectGeneration;
-    private int _rdpSettingsReconnectRetriesRemaining;
-    private bool _rdpSettingsReconnectRetryInProgress;
-    private bool _rdpSettingsReconnectActive;
     private bool _statusTickInProgress;
     private bool _disposed;
     private string? _lastOperationMessage;
-    private System.Collections.Generic.IReadOnlyList<ChildSessionEnvironmentCheck.Issue> _environmentIssues = [];
+    private SessionEnvironment _environment = SessionEnvironment.Empty;
 
     /// <summary>
     /// 启动代际。主动断开、注销与释放使它自增，旧启动据此判断是否已被取代。
@@ -201,14 +133,6 @@ public sealed class ChildSessionService : IDisposable
     /// 分身分辨率被修改。全屏模式据此重新判断该用 1:1 还是自适应缩放。
     /// </summary>
     public event EventHandler? DesktopSizeChanged;
-
-    /// <summary>
-    /// 自动登录服务。未注入时为 null。
-    ///
-    /// 界面要读写「已保存的密码」，而凭据的实际使用发生在本服务内部，
-    /// 与其让两处各持一个实例，不如由本服务持有、界面借用。
-    /// </summary>
-    internal AutoLoginService? AutoLogin => _autoLogin;
 
     /// <summary>
     /// 状态栏文本。
@@ -306,23 +230,14 @@ public sealed class ChildSessionService : IDisposable
     }
 
     /// <summary>
-    /// 系统是否已安装并启用 RDP Wrapper。它与桌面分身功能不兼容，界面会在启动前据此提示用户。
-    /// </summary>
-    public static bool IsRdpWrapperEnabled()
-    {
-        return ChildSessionNativeMethods.IsRdpWrapperEnabled();
-    }
-
-    /// <summary>
     /// 最近一次启动前环境预检是否发现了可能影响桌面分身的环境设置。
     /// </summary>
-    public bool HasEnvironmentIssue => _environmentIssues.Count > 0;
+    public bool HasEnvironmentIssue => _environment.HasIssues;
 
     /// <summary>
     /// 环境预检中是否存在必然失败的阻塞项。
     /// </summary>
-    public bool HasBlockingEnvironmentIssue =>
-        ChildSessionEnvironmentCheck.HasBlockingIssue(_environmentIssues);
+    public bool HasBlockingEnvironmentIssue => _environment.HasBlockingIssues;
 
     /// <summary>
     /// 最近一次失败是否像是「凭据被拒」。
@@ -339,27 +254,35 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 最近一次启动前环境预检的结论文本，供界面提示与问题排查使用。
     /// </summary>
-    public string EnvironmentIssueSummary =>
-        ChildSessionEnvironmentCheck.BuildSummary(_environmentIssues);
+    public string EnvironmentIssueSummary => _environment.Summary;
 
-    /// <summary>创建编排服务，窗口工厂由应用入口提供。</summary>
+    /// <summary>Composes a lifecycle with explicit platform, UI-thread and time dependencies.</summary>
     internal ChildSessionService(SettingsService settings,
-        Func<ChildSessionService, IDesktopSessionView> createView, AutoLoginService? autoLogin = null)
+        Func<ChildSessionService, IDesktopSessionView> createView,
+        IChildSessionPlatform platform, ISessionDispatcher dispatcher, TimeProvider timeProvider,
+        ISessionAutoLogin? autoLogin = null)
     {
         _settings = settings;
+        _platform = platform;
+        _dispatcher = dispatcher;
+        _timeProvider = timeProvider;
         _autoLogin = autoLogin;
-        _desktopHost = new DesktopSessionHost(() => createView(this), () => settings.Current.Session, ProvideAutoLoginCredential);
+        _desktopHost = new DesktopSessionHost(() => createView(this), () => settings.Current.Session,
+            () => _autoLogin?.GetCredential());
         _desktopHost.VisibilityChanged += OnDesktopWindowVisibilityChanged;
         _desktopHost.ConnectionFailed += OnRdpConnectionFailed;
         _desktopHost.LoginCompleted += OnRdpLoginCompleted;
         _desktopHost.DesktopSizeChanged += OnRdpDesktopSizeChanged;
+        _connection = new SessionConnection(dispatcher, timeProvider,
+            () => EnsureDesktopWindow().RdpHost, () => DesktopSize,
+            () => _platform.TryGetChildSessionId() is { } id && _platform.IsSessionActive(id),
+            CreateConnectionTimeoutFailure);
+        _connection.Failed += (_, error) => CompleteConnectionFailure(error);
+        _connection.Retrying += OnConnectionRetrying;
         SendSystemShortcutsToRemote = settings.Current.Session.SendSystemShortcutsToRemote;
-        _statusTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromMilliseconds(500)
-        };
-        _statusTimer.Tick += OnStatusTimerTick;
-        _statusTimer.Start();
+        // One queued status read at a time even if the UI is busy for several timer periods.
+        _statusTimer = timeProvider.CreateTimer(_ => QueueStatusRefresh(), null,
+            TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
         RefreshState();
     }
 
@@ -390,19 +313,7 @@ public sealed class ChildSessionService : IDisposable
     private Task StartAsync(int? expectedGeneration)
     {
         ThrowIfDisposed();
-
-        // 后台调用方
-        // 调过来时已经在池线程上，而下面要碰 RDP 控件和窗口。WPF 对象只认创建它的
-        // 线程，不切回去就直接抛 InvalidOperationException——兜底反而成了故障点。
-        if (_dispatcher.CheckAccess())
-        {
-            return StartSharedAsync(expectedGeneration);
-        }
-
-        return _dispatcher
-            .InvokeAsync(() => StartSharedAsync(expectedGeneration))
-            .Task
-            .Unwrap();
+        return _dispatcher.InvokeAsync(() => StartSharedAsync(expectedGeneration));
     }
 
     /// <summary>
@@ -436,54 +347,18 @@ public sealed class ChildSessionService : IDisposable
         }
         previous.Cancel();
         previous.Dispose();
-        _settingsReconnectGeneration++;
-        _connectionRetryInProgress = false;
-        _rdpSettingsReconnectRetryInProgress = false;
-        _rdpSettingsReconnectActive = false;
+        _connection.Cancel();
     }
 
-    /// <summary>
-    /// 同一次启动只跑一遍：两次启动请求叠在一起时，
-    /// 后到的那个等前一个的结果，不再单独发起一次连接尝试——
-    /// 否则第一次尝试失败后，第二次的预检回来时会重新建一个尝试，用户要输两遍密码。
-    /// </summary>
     private Task StartSharedAsync(int? expectedGeneration)
     {
-        // 先校验请求，再决定是否共用任务，旧请求不能借用新一代的启动。
-        if (_sessionClosing || (expectedGeneration is { } expected && expected != StartGeneration))
+        if (_disposed || _sessionClosing || (expectedGeneration is { } expected && expected != StartGeneration))
             return Task.CompletedTask;
-        lock (_startOperationGate)
-        {
-            if (_startOperation is { IsCompleted: false } running
-                && _startOperationGeneration == _startGeneration)
-            {
-                return running;
-            }
-
-            // 上一次启动已被注销作废：它的任务还在跑，但不会去连接，不能共用。
-            var task = StartCoreAsync(expectedGeneration);
-            _startOperation = task;
-            _startOperationGeneration = _startGeneration;
-            return AwaitAndClearStartAsync(task);
-        }
-    }
-
-    private async Task AwaitAndClearStartAsync(Task task)
-    {
-        try
-        {
-            await task.ConfigureAwait(false);
-        }
-        finally
-        {
-            lock (_startOperationGate)
-            {
-                if (ReferenceEquals(_startOperation, task))
-                {
-                    _startOperation = null;
-                }
-            }
-        }
+        if (_startOperation is { IsCompleted: false } running && _startOperationGeneration == StartGeneration)
+            return running;
+        // Only the dispatcher writes this pair. A completed operation needs no asynchronous cleanup.
+        _startOperationGeneration = StartGeneration;
+        return _startOperation = StartCoreAsync(expectedGeneration);
     }
 
     private async Task StartCoreAsync(int? expectedGeneration)
@@ -502,7 +377,7 @@ public sealed class ChildSessionService : IDisposable
 
         RefreshState();
         if (ConnectedState == 1 && ChildSessionId is { } connectedId
-            && ChildSessionNativeMethods.IsSessionActive(connectedId)) return;
+            && _platform.IsSessionActive(connectedId)) return;
 
         // 连接只做必要预检；计划任务与系统文件完整性留给完整诊断。
         //
@@ -516,9 +391,9 @@ public sealed class ChildSessionService : IDisposable
 
         // 已有会话的重连不重复跑完整诊断；新建前仍采集一次。
         var issues = ChildSessionId is null
-            && (_environmentCheckedTick is not { } checkedAt || Environment.TickCount64 - checkedAt > 30_000)
-            ? await Task.Run(() => ChildSessionEnvironmentCheck.CollectForConnection()).ConfigureAwait(true)
-            : _environmentIssues;
+            && (_environmentCheckedTick is not { } checkedAt || _timeProvider.GetElapsedTime(checkedAt) > TimeSpan.FromSeconds(30))
+            ? await _platform.CollectConnectionIssuesAsync().ConfigureAwait(true)
+            : _environment;
 
         // 预检期间可能被注销或释放。那之后不能再改系统状态、更不能把会话建回来。
         if (_disposed || _sessionClosing || startGeneration != _startGeneration)
@@ -533,96 +408,15 @@ public sealed class ChildSessionService : IDisposable
         RefreshState();
 
         if (ConnectedState == 1 && ChildSessionId is { } activeId
-            && ChildSessionNativeMethods.IsSessionActive(activeId))
+            && _platform.IsSessionActive(activeId))
         {
             return;
         }
 
-        var completionSource = _connectionAttemptCompletionSource;
-        if (completionSource is null || completionSource.Task.IsCompleted)
-        {
-            completionSource = new TaskCompletionSource<bool>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-            _connectionAttemptCompletionSource = completionSource;
-            _lastConnectionFailure = null;
-            _credentialFailureSuspected = false;
-
-            // 先给整次启动一个超时预算：ConnectCore 里可能压根没有发起连接
-            //（窗口已处于连接状态），那种情况下没有这一步就会立刻判超时。
-            MarkAttemptStarted();
-
-            try
-            {
-                ConnectCore(Locale.Get("Svc.Status.Starting"));
-            }
-            catch
-            {
-                _autoLaunchPending = false;
-                _initialConnectionRetriesRemaining = 0;
-                completionSource.TrySetResult(false);
-                _connectionAttemptCompletionSource = null;
-                throw;
-            }
-        }
-
-        try
-        {
-            await WaitForConnectionAttemptAsync(completionSource);
-        }
-        finally
-        {
-            if (ReferenceEquals(_connectionAttemptCompletionSource, completionSource))
-            {
-                _connectionAttemptCompletionSource = null;
-            }
-        }
+        _lastConnectionFailure = null;
+        _credentialFailureSuspected = false;
+        await ConnectCoreAsync(Locale.Get("Svc.Status.Starting"));
     }
-
-    /// <summary>
-    /// 等本次启动出结果。
-    ///
-    /// 超时按**单次尝试**计算：重试会把截止时刻推后，否则用户在第一轮慢慢输入密码，
-    /// 重试刚开始就被总超时掐掉，日志还会误报成「连接超时」。
-    /// 超时属于外部原因（会话没响应），不再重试——直接按失败处理。
-    /// </summary>
-    private async Task WaitForConnectionAttemptAsync(TaskCompletionSource<bool> completionSource)
-    {
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            SessionCancellationToken, _disposeCancellationTokenSource.Token);
-        while (!completionSource.Task.IsCompleted)
-        {
-            var remainingMilliseconds = _attemptDeadlineTick - Environment.TickCount64;
-            if (remainingMilliseconds <= 0)
-            {
-                _autoLaunchPending = false;
-                _initialConnectionRetriesRemaining = 0;
-                TryDisconnectRdpHost();
-                CompleteConnectionFailure(CreateConnectionTimeoutFailure());
-                return;
-            }
-
-            try
-            {
-                await completionSource.Task.WaitAsync(
-                    TimeSpan.FromMilliseconds(remainingMilliseconds),
-                    cancellation.Token);
-            }
-            catch (TimeoutException)
-            {
-                // 回到循环顶部重新读截止时刻：可能刚被重试推后了。
-            }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-            {
-                return;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 标记一次新的连接尝试开始，重置单次尝试的超时截止时刻。
-    /// </summary>
-    private void MarkAttemptStarted() =>
-        _attemptDeadlineTick = Environment.TickCount64 + (long)ConnectionTimeout.TotalMilliseconds;
 
     /// <summary>
     /// 显示分身窗口。窗口不存在时创建。
@@ -853,7 +647,7 @@ public sealed class ChildSessionService : IDisposable
     {
         ThrowIfDisposed();
         if (!_dispatcher.CheckAccess())
-            return _dispatcher.InvokeAsync(() => LogoffAndHideAsync(expectedSessionId)).Task.Unwrap();
+            return _dispatcher.InvokeAsync(() => LogoffAndHideAsync(expectedSessionId));
         if (_logoffOperation is { IsCompleted: false } running) return running;
         _logoffRequest = null;
         return _logoffOperation = LogoffCoreAsync(expectedSessionId);
@@ -868,7 +662,7 @@ public sealed class ChildSessionService : IDisposable
         ThrowIfDisposed();
         if (!_dispatcher.CheckAccess())
         {
-            await _dispatcher.InvokeAsync(RequestLogoffForExitAsync).Task.Unwrap();
+            await _dispatcher.InvokeAsync(RequestLogoffForExitAsync);
             return;
         }
 
@@ -890,7 +684,7 @@ public sealed class ChildSessionService : IDisposable
     {
         ThrowIfDisposed();
         using var timing = new PerformanceTrace("分身注销（下发与完成观察）");
-        var activeSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
+        var activeSessionId = _platform.TryGetChildSessionId();
         if (expectedSessionId is { } expected && activeSessionId is { } active && active != expected)
             throw new InvalidOperationException(Locale.Format("Svc.Status.SessionChanged", expected, active));
 
@@ -900,25 +694,17 @@ public sealed class ChildSessionService : IDisposable
         try
         {
             _autoLaunchPending = false;
-            _initialConnectionRetriesRemaining = 0;
             _pendingRdpSettingChanges = RdpSettingChange.None;
-            _rdpSettingsReconnectRetriesRemaining = 0;
-            _rdpSettingsReconnectActive = false;
-            _connectionAttemptCompletionSource?.TrySetResult(false);
 
             TryDisconnectRdpHost();
             RefreshState(Locale.Get("Svc.Status.LoggingOff"));
 
+            _autoLogin?.StopWatching();
             _logoffRequest = (expectedSessionId ?? activeSessionId) is { } targetSessionId
-                ? Task.Run(() =>
-                {
-                    using var requestTiming = new PerformanceTrace("Windows 注销请求下发");
-                    return ChildSessionNativeMethods.TerminateChildSession(targetSessionId, wait: false);
-                })
-                : Task.FromResult<uint?>(null);
+                ? _platform.RequestLogoffAsync(targetSessionId) : Task.FromResult<uint?>(null);
             var operation = new SessionLogoffOperation(_logoffRequest,
-                ChildSessionNativeMethods.TryGetChildSessionId, TimeSpan.FromSeconds(15),
-                _disposeCancellationTokenSource.Token);
+                _platform.TryGetChildSessionId, TimeSpan.FromSeconds(15),
+                _timeProvider, _disposeCancellationTokenSource.Token);
             await operation.Completion;
             var terminatedSessionId = await operation.Request;
             _desktopHost.Current?.Hide();
@@ -938,7 +724,7 @@ public sealed class ChildSessionService : IDisposable
     public void DisableChildSessionsFeature()
     {
         ThrowIfDisposed();
-        ChildSessionNativeMethods.DisableChildSessions();
+        _platform.DisableChildSessions();
         RefreshState(Locale.Get("Svc.Status.ChildSessionsDisabled"));
     }
 
@@ -960,8 +746,8 @@ public sealed class ChildSessionService : IDisposable
 
         try
         {
-            var enabled = ChildSessionNativeMethods.IsChildSessionsEnabled();
-            ChildSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
+            var enabled = _platform.IsChildSessionsEnabled();
+            ChildSessionId = _platform.TryGetChildSessionId();
             ConnectedState = _desktopHost.Current?.RdpHost.ConnectedState ?? 0;
 
             var connectionText = ConnectedState switch
@@ -998,9 +784,9 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 状态栏里描述远程桌面服务的那一段：正常返回空串，异常时返回「 | TermService：未启动/已禁用」。
     /// </summary>
-    private static string DescribeTermServiceForStatus()
+    private string DescribeTermServiceForStatus()
     {
-        var (state, startType) = ChildSessionEnvironmentCheck.QueryTermService();
+        var (state, startType) = _platform.QueryTermService();
 
         if (startType == "Disabled")
         {
@@ -1010,49 +796,9 @@ public sealed class ChildSessionService : IDisposable
         return state is "Stopped" or "StopPending" ? Locale.Get("Svc.Status.TermStopped") : string.Empty;
     }
 
-    /// <summary>
-    /// 用户点「启动」时，把「已停止」的远程桌面服务拉起来。
-    ///
-    /// 只处理「启动类型正常、但服务没在运行」这一种情况：被禁用的服务不在这里动，
-    /// 那需要改启动类型，属于用户的显式选择，交给诊断面板处理。
-    /// 服务本来就在运行（或已禁用）时返回 false，调用方据此决定要不要重新预检。
-    /// </summary>
-    /// <param name="error">启动失败的原因；没做事或成功时为空。</param>
-    /// <returns>本次是否真的把服务启动起来了。</returns>
-    public bool TryStartTermServiceIfStopped(out string error)
-    {
-        error = string.Empty;
-
-        var (state, startType) = ChildSessionEnvironmentCheck.QueryTermService();
-        if (startType == "Disabled" || state is not ("Stopped" or "StopPending"))
-        {
-            return false;
-        }
-
-        if (!ServiceNativeMethods.TryStart("TermService", out var startError))
-        {
-            error = startError;
-            AppLog.Warn($"启动远程桌面服务失败：{startError}");
-            return false;
-        }
-
-        // 服务启动是异步的：等它真的进入 Running，调用方才能据此重新预检。
-        const int timeoutSeconds = 5;
-        for (var elapsed = 0; elapsed < timeoutSeconds * 5; elapsed++)
-        {
-            if (ServiceNativeMethods.TryQueryState("TermService", out var current) && current == 4)
-            {
-                AppLog.Info("远程桌面服务已自动启动。");
-                return true;
-            }
-
-            Thread.Sleep(200);
-        }
-
-        error = Locale.Format("Svc.Error.TermServiceStartTimeout", timeoutSeconds);
-        AppLog.Warn(error);
-        return false;
-    }
+    /// <summary>Asynchronously starts a stopped service; disposal cancels only the bounded observation.</summary>
+    public Task<bool> TryStartTermServiceIfStoppedAsync() =>
+        _platform.TryStartTermServiceIfStoppedAsync(_disposeCancellationTokenSource.Token);
 
     /// <summary>
     /// 采集并发布一次连接预检（全部阻塞项，不含完整诊断扫描）。
@@ -1074,84 +820,31 @@ public sealed class ChildSessionService : IDisposable
         }
 
         using var timing = new PerformanceTrace("连接必要预检");
-        var issues = await Task.Run(() => ChildSessionEnvironmentCheck.CollectForConnection()).ConfigureAwait(false);
+        var issues = await _platform.CollectConnectionIssuesAsync().ConfigureAwait(false);
         await PublishEnvironmentIssuesIfCurrent(issues, generation).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// 发布预检结果，但如果期间已经有更新的一轮开始了就丢弃这一份。
-    ///
-    /// 两处都会调它：启动流程的预检、界面/切换流程的单独预检。没有代际的话，
-    /// 一轮慢扫描回来会把更新的结论盖掉，界面据此做出错误的阻塞判断。
-    /// </summary>
     private Task PublishEnvironmentIssuesIfCurrent(
-        System.Collections.Generic.IReadOnlyList<ChildSessionEnvironmentCheck.Issue> issues,
-        int generation)
-    {
-        if (_dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished)
-        {
-            return Task.CompletedTask;
-        }
-
-        void Publish()
+        SessionEnvironment issues, int generation) =>
+        _dispatcher.InvokeAsync(() =>
         {
             if (_disposed) return;
             lock (_environmentGate)
             {
-                // 只有比「已经发布过的」更旧才丢弃。写成一味要求等于当前代际的话，
-                // 新一轮刚起跑时这一份会被扔掉，而调用方（启动流程）随后读到的
-                // 还是上一次的结论，可能漏掉阻塞项。
-                if (generation < _environmentPublishedGeneration)
-                {
-                    AppLog.Info("丢弃过期的环境预检结果（已发布过更新的一轮）。");
-                    return;
-                }
-
+                if (generation < _environmentPublishedGeneration) return;
                 _environmentPublishedGeneration = generation;
             }
-
             PublishEnvironmentIssues(issues);
-        }
-
-        if (_dispatcher.CheckAccess())
-        {
-            Publish();
-            return Task.CompletedTask;
-        }
-
-        // 走队列而不是同步 Invoke：调用方多半在池线程上等结果，没必要把它卡住。
-        // 但要给出一个「发布完成」的信号，否则调用方没法知道自己读到的是不是新结论。
-        var completion = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-
-        _dispatcher.BeginInvoke(new Action(() =>
-        {
-            try
-            {
-                Publish();
-            }
-            finally
-            {
-                completion.TrySetResult(true);
-            }
-        }));
-
-        return completion.Task;
-    }
+        });
 
     /// <summary>
     /// 发布一次预检结果（字段 + 日志）。调用方必须已经在 UI 线程上。
     /// </summary>
-    private void PublishEnvironmentIssues(
-        System.Collections.Generic.IReadOnlyList<ChildSessionEnvironmentCheck.Issue> issues)
+    private void PublishEnvironmentIssues(SessionEnvironment issues)
     {
-        _environmentIssues = issues;
-        _environmentCheckedTick = Environment.TickCount64;
-
-        foreach (var issue in issues)
-        {
-            AppLog.Warn($"环境预检：{issue.Title}。{issue.Summary}");
-        }
+        _environment = issues;
+        _environmentCheckedTick = _timeProvider.GetTimestamp();
+        if (issues.HasIssues) AppLog.Warn($"环境预检：{issues.Summary}");
     }
 
     /// <summary>
@@ -1167,15 +860,12 @@ public sealed class ChildSessionService : IDisposable
         InvalidateSessionOperations();
 
         _disposed = true;
-        _statusTimer.Stop();
-        _statusTimer.Tick -= OnStatusTimerTick;
+        _statusTimer.Dispose();
+        _connection.Dispose();
+        _autoLogin?.StopWatching();
         _disposeCancellationTokenSource.Cancel();
         _autoLaunchPending = false;
-        _connectionAttemptCompletionSource?.TrySetCanceled();
-        _connectionAttemptCompletionSource = null;
-        _initialConnectionRetriesRemaining = 0;
         _pendingRdpSettingChanges = RdpSettingChange.None;
-        _rdpSettingsReconnectRetriesRemaining = 0;
 
         if (_desktopHost.Current is not null)
         {
@@ -1192,10 +882,10 @@ public sealed class ChildSessionService : IDisposable
             // 带上当前会话号：若期间会话已被重建，宁可残留也不要误注销别人的会话。
             if (!_exitRequested || _logoffRequest is not { IsCompletedSuccessfully: true })
             {
-                var sessionId = ChildSessionNativeMethods.TryGetChildSessionId();
-                _ = sessionId is null
-                    ? ChildSessionNativeMethods.TerminateChildSession(wait: false)
-                    : ChildSessionNativeMethods.TerminateChildSession(sessionId.Value, wait: false);
+                if (_platform.TryGetChildSessionId() is { } sessionId)
+                    // OnExit cannot leave a request queued behind process teardown. As before,
+                    // this fallback waits for request acceptance, never for Windows session cleanup.
+                    _platform.RequestLogoffAsync(sessionId).GetAwaiter().GetResult();
             }
         }
         catch (Exception exception) when (IsExpectedChildSessionException(exception))
@@ -1211,86 +901,36 @@ public sealed class ChildSessionService : IDisposable
         _disposeCancellationTokenSource.Dispose();
     }
 
-    private void ConnectCore(string operationMessage)
+    private Task ConnectCoreAsync(string operationMessage)
     {
-        var existingSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
+        var existingSessionId = _platform.TryGetChildSessionId();
         var window = EnsureDesktopWindow();
-
-        // 用户主动隐藏过窗口就别弹出来：连接本身不需要窗口可见，
-        // 切回分身时突然弹窗会打断他正在做的事。
-        if (!_windowHiddenByUser)
-        {
-            ShowDesktopWindow(window);
-        }
-
-        if (window.RdpHost.ConnectedState == 0)
-        {
-            // 会话是新建的才需要自动拉起目标程序；接管已有会话时不能替用户再开一份。
-            _autoLaunchPending = existingSessionId is null
-                                 && _settings.Current.Launch.AutoLaunchOnConnect
-                                 && !string.IsNullOrWhiteSpace(_settings.Current.Launch.TargetPath);
-            // 重试与「连接后自动启动目标程序」无关：输错密码的用户往往根本没开那个开关，
-            // 而重连一次正是唯一能让他再输一次密码的途径。
-            _initialConnectionRetriesRemaining = ConnectionRetryCount;
-            _suppressCredentialDialogFill = false;
-            MarkAttemptStarted();
-            window.RdpHost.ConnectToChildSession(DesktopSize);
-        }
-        else if (window.RdpHost.ConnectedState == 1 && existingSessionId is { } staleId
-            && !ChildSessionNativeMethods.IsSessionActive(staleId))
-        {
-            window.RdpHost.ReconnectToChildSession(DesktopSize);
-        }
-
+        if (!_windowHiddenByUser) ShowDesktopWindow(window);
+        _autoLaunchPending = existingSessionId is null
+            && _settings.Current.Launch.AutoLaunchOnConnect
+            && !string.IsNullOrWhiteSpace(_settings.Current.Launch.TargetPath);
+        var task = _connection.Start(reconnect: window.RdpHost.ConnectedState != 0);
         RefreshState(operationMessage);
+        return task;
     }
 
     private IDesktopSessionView EnsureDesktopWindow() => _desktopHost.GetOrCreate();
 
-    /// <summary>
-    /// 给 RDP 客户端提供自动登录凭据。关闭开关或没存密码时返回 null，退回交互式输入。
-    /// </summary>
-    private (string UserName, string Domain, string Password)? ProvideAutoLoginCredential()
-    {
-        if (_autoLogin is null)
-        {
-            return null;
-        }
-
-        return _autoLogin.TryGetCredential(out var credential)
-            ? (credential.UserName, credential.Domain, credential.Password)
-            : null;
-    }
-
     private static void ShowDesktopWindow(IDesktopSessionView window) => window.ShowAndActivate();
 
-    /// <summary>
-    /// 是否正处在连接流程里（RDP 正在连接，或有一次连接尝试在途）。
-    ///
-    /// 不能只看 <see cref="ConnectedState"/>：Connect 是异步发起的，刚调用完的那一小段
-    /// 时间里状态还没变成 2，只看它会误判成「不在连接中」而把刚启动的凭据框监听停掉。
-    /// 设置变更后的自动重连也要算进来——那段时间状态同样是 0，但它确实还会再连一次。
-    /// </summary>
-    private bool IsConnectionAttemptInProgress()
+    private int _statusRefreshQueued;
+
+    private void QueueStatusRefresh()
     {
-        return ConnectedState == 2
-               || _connectionAttemptCompletionSource is { Task.IsCompleted: false }
-               || _rdpSettingsReconnectActive;
+        if (Interlocked.Exchange(ref _statusRefreshQueued, 1) != 0) return;
+        _dispatcher.Post(() =>
+        {
+            Interlocked.Exchange(ref _statusRefreshQueued, 0);
+            OnStatusTimerTick();
+        });
     }
 
-    private bool ExpireSettingsReconnect()
-    {
-        if (!_rdpSettingsReconnectActive || _rdpSettingsReconnectRetryInProgress
-            || Environment.TickCount64 < _attemptDeadlineTick) return false;
-        _rdpSettingsReconnectActive = false;
-        _rdpSettingsReconnectRetriesRemaining = 0;
-        _settingsReconnectGeneration++;
-        _desktopHost.Current?.RdpHost.CancelPendingReconnect();
-        // 待应用设置留给下一次显式连接，超时本身不继续消耗重试或认证次数。
-        return true;
-    }
-
-    private void OnStatusTimerTick(object? sender, EventArgs e)
+    private void OnStatusTimerTick()
     {
         if (_statusTickInProgress || _disposed)
         {
@@ -1301,26 +941,20 @@ public sealed class ChildSessionService : IDisposable
         try
         {
             RefreshState();
-            if (ExpireSettingsReconnect())
-            {
-                TryDisconnectRdpHost();
-                CompleteConnectionFailure(CreateConnectionTimeoutFailure());
-            }
 
             // 连接中且开了自动登录：开始盯着可能出现的凭据弹窗。
             // 放在状态轮询里而不是每个连接入口各写一遍，重连、重试、设置变更全覆盖。
             // 重试这一轮例外：它的意义就是让用户重新输一次，自动填会把同一份（很可能
             // 已经失效的）密码再提交一遍，白白多一次失败登录。
-            if (ConnectedState == 2
+            if (_connection.Phase == SessionConnectionPhase.Connecting && ConnectedState == 2
                 && _autoLogin is { IsEnabled: true }
-                && !_suppressCredentialDialogFill)
+                && !_connection.SuppressCredentialDialogFill)
             {
                 _autoLogin.StartWatching();
             }
-            else if (!IsConnectionAttemptInProgress())
+            else
             {
-                // 连接已经不在进行中（既没在连、也没有在途的连接尝试）就别再盯着凭据框：
-                // 监听会自己跑到 60 秒上限，这段时间里本机任何一个凭据框都有可能被误填。
+                // 断开、释放、退避及空闲阶段都没有待提交的登录，不监听本机凭据框。
                 _autoLogin?.StopWatching();
             }
         }
@@ -1363,7 +997,7 @@ public sealed class ChildSessionService : IDisposable
             RefreshState(isAutomatic
                 ? Locale.Format("Svc.Status.ReadyAutoLaunching", fileName)
                 : Locale.Format("Svc.Status.Launching", fileName));
-            await ChildSessionProcessLauncher.LaunchAsync(
+            await _platform.LaunchAsync(
                 childSessionId,
                 executablePath,
                 arguments,
@@ -1392,9 +1026,9 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 取当前分身会话 ID；没有可用会话时抛出 <see cref="InvalidOperationException"/>。
     /// </summary>
-    private static uint GetRequiredChildSessionId()
+    private uint GetRequiredChildSessionId()
     {
-        var childSessionId = ChildSessionNativeMethods.TryGetChildSessionId();
+        var childSessionId = _platform.TryGetChildSessionId();
         if (childSessionId is null)
         {
             throw new InvalidOperationException(Locale.Get("Svc.Error.NoSession"));
@@ -1403,34 +1037,11 @@ public sealed class ChildSessionService : IDisposable
         return childSessionId.Value;
     }
 
-    private static void EnsureChildSessionsEnabled()
+    private void EnsureChildSessionsEnabled()
     {
-        if (!ChildSessionNativeMethods.IsChildSessionsEnabled())
+        if (!_platform.IsChildSessionsEnabled())
         {
-            ChildSessionNativeMethods.EnableChildSessions();
-        }
-    }
-
-    /// <summary>
-    /// 判断「普通权限运行」是否真的会降权。
-    ///
-    /// 计划任务的 TASK_RUNLEVEL_LUA 只在 UAC 启用时才产生受限令牌；
-    /// UAC 关闭（EnableLUA=0）或使用内置 Administrator 账户时，LUA 等同于最高权限。
-    /// 读不到注册表时按「不降权」处理，宁可多弹一次确认也不要静默提权。
-    /// </summary>
-    private static bool IsLeastPrivilegeEnforced()
-    {
-        try
-        {
-            using var policiesKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System");
-            return policiesKey?.GetValue("EnableLUA") is int enableLua && enableLua != 0;
-        }
-        catch (Exception exception) when (exception is System.Security.SecurityException
-                                              or UnauthorizedAccessException
-                                              or IOException)
-        {
-            return false;
+            _platform.EnableChildSessions();
         }
     }
 
@@ -1439,56 +1050,23 @@ public sealed class ChildSessionService : IDisposable
         RefreshState();
     }
 
-    private void OnRdpConnectionFailed(
-        object? sender,
-        ChildSessionConnectionFailedEventArgs e)
+    private void OnRdpConnectionFailed(object? sender, ChildSessionConnectionFailedEventArgs error)
     {
         if (_disposed || _sessionClosing) return;
-        _lastConnectionFailure = e;
-
-        // 这一轮连接结束了，停止盯凭据弹窗；下一次连接会重新开始计数。
+        _lastConnectionFailure = error;
         _autoLogin?.StopWatching();
-
-        if (_pendingRdpSettingChanges != RdpSettingChange.None)
-        {
-            if (_rdpSettingsReconnectRetryInProgress)
-            {
-                return;
-            }
-
-            if (_rdpSettingsReconnectRetriesRemaining > 0)
-            {
-                RetryRdpSettingsReconnectAsync(e);
-                return;
-            }
-
-            _pendingRdpSettingChanges = RdpSettingChange.None;
-            _rdpSettingsReconnectActive = false;
-        }
-
-        if (_initialConnectionRetriesRemaining > 0
-            && !_connectionRetryInProgress)
-        {
-            RetryInitialConnectionAsync(e);
-            return;
-        }
-
-        CompleteConnectionFailure(e);
+        _connection.ReportFailure(error);
     }
 
     // RDP 报告连接成功后稍作等待，让新分身会话的桌面初始化完成。
     // 使用 OnLoginComplete 等待实际登录完成，避免依赖固定时长的延时。
     private async void OnRdpLoginCompleted(object? sender, EventArgs e)
     {
-        if (_disposed || _sessionClosing) return;
+        if (_disposed || _sessionClosing || !_connection.CompleteLogin()) return;
+        var generation = StartGeneration;
         _lastConnectionFailure = null;
-        _initialConnectionRetriesRemaining = 0;
-        _connectionRetryInProgress = false;
         _credentialFailureSuspected = false;
-        // 登录成功之后一切照旧：下一次连接该自动填还是自动填。
-        _suppressCredentialDialogFill = false;
-        ChildSessionEnvironmentCheck.ClearConnectionFailure();
-        _connectionAttemptCompletionSource?.TrySetResult(true);
+        _platform.ClearConnectionFailure();
 
         // 登录已经完成，再盯着凭据弹窗只会误填下一个（比如用户手动打开的安全对话框）。
         _autoLogin?.StopWatching();
@@ -1497,12 +1075,9 @@ public sealed class ChildSessionService : IDisposable
         _desktopHost.Current?.RdpHost.SetInputBlocked(WatchModeEnabled);
 
         var completedSettingChanges = _pendingRdpSettingChanges;
-        _rdpSettingsReconnectActive = false;
         if (completedSettingChanges != RdpSettingChange.None)
         {
             _pendingRdpSettingChanges = RdpSettingChange.None;
-            _rdpSettingsReconnectRetriesRemaining = 0;
-            _rdpSettingsReconnectRetryInProgress = false;
             RefreshState(Locale.Get("Svc.Status.RdpSettingsApplied"));
 
             if (completedSettingChanges.HasFlag(RdpSettingChange.SystemShortcuts))
@@ -1527,10 +1102,7 @@ public sealed class ChildSessionService : IDisposable
 
         _autoLaunchPending = false;
         await Task.Yield();
-        if (_disposed)
-        {
-            return;
-        }
+        if (_disposed || _sessionClosing || generation != StartGeneration) return;
 
         try
         {
@@ -1562,7 +1134,7 @@ public sealed class ChildSessionService : IDisposable
                             AutoLaunchSkipped?.Invoke(this, EventArgs.Empty);
                         }
                     }
-                    else if (!IsLeastPrivilegeEnforced())
+                    else if (!_platform.IsLeastPrivilegeEnforced())
                     {
                         // 安全边界：UAC 关闭时 TASK_RUNLEVEL_LUA 不降权，普通权限的目标程序
                         // 仍然以高完整性运行，等于变相提权。这里判断的是「实际会不会降权」
@@ -1587,155 +1159,12 @@ public sealed class ChildSessionService : IDisposable
         }
     }
 
-    private async void RetryRdpSettingsReconnectAsync(
-        ChildSessionConnectionFailedEventArgs firstFailure)
+    private void OnConnectionRetrying(int number, int maximum, TimeSpan delay, bool settingsChange)
     {
-        _rdpSettingsReconnectRetryInProgress = true;
-        ChildSessionConnectionFailedEventArgs? retryFailure = null;
-
-        // 记下代际：等待期间可能切到主桌面，那次重试就不该再发起了。
-        var generation = _settingsReconnectGeneration;
-        var startGeneration = StartGeneration;
-        var retryNumber = RdpSettingsReconnectRetryCount
-                          - _rdpSettingsReconnectRetriesRemaining
-                          + 1;
-        _rdpSettingsReconnectRetriesRemaining--;
-        var retryDelay = TimeSpan.FromSeconds(1 << retryNumber);
-
-        AppLog.Warn(
-            $"RDP 设置切换后的自动重连失败，将在 {retryDelay.TotalSeconds:0} 秒后进行第 {retryNumber} 次重试。"
-            + $"错误：{firstFailure.Message}，错误代码：{firstFailure.ErrorCode}，"
-            + $"扩展错误代码：{firstFailure.ExtendedErrorCode}");
-        RefreshState(
-            Locale.Format(
-                "Svc.Status.RdpReconnectRetrying",
-                retryDelay.TotalSeconds,
-                retryNumber,
-                RdpSettingsReconnectRetryCount));
-
-        try
-        {
-            await Task.Delay(retryDelay, SessionCancellationToken);
-            if (_disposed
-                || startGeneration != StartGeneration
-                || generation != _settingsReconnectGeneration
-                || _pendingRdpSettingChanges == RdpSettingChange.None)
-            {
-                return;
-            }
-
-            RefreshState(
-                Locale.Format("Svc.Status.RdpReconnectRetryNow", retryNumber, RdpSettingsReconnectRetryCount));
-            _rdpSettingsReconnectRetryInProgress = false;
-            MarkAttemptStarted();
-            EnsureDesktopWindow().RdpHost.ReconnectToChildSession(DesktopSize);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception exception) when (IsExpectedChildSessionException(exception))
-        {
-            var actualException = exception.GetBaseException();
-            var errorCode = actualException is COMException comException
-                ? comException.ErrorCode
-                : 0;
-            retryFailure = new ChildSessionConnectionFailedEventArgs(
-                Locale.Format("Svc.Error.RdpReconnectFailed", actualException.Message),
-                errorCode);
-        }
-        finally
-        {
-            if (generation == _settingsReconnectGeneration && startGeneration == StartGeneration)
-                _rdpSettingsReconnectRetryInProgress = false;
-        }
-
-        if (retryFailure is not null && generation == _settingsReconnectGeneration
-            && startGeneration == StartGeneration)
-        {
-            OnRdpConnectionFailed(this, retryFailure);
-        }
-    }
-
-    private async void RetryInitialConnectionAsync(ChildSessionConnectionFailedEventArgs firstFailure)
-    {
-        var generation = StartGeneration;
-        var completion = _connectionAttemptCompletionSource;
-        var cancellationToken = SessionCancellationToken;
-        _connectionRetryInProgress = true;
-        ChildSessionConnectionFailedEventArgs? retryFailure = null;
-
-        // 这一轮不自动填弹窗：留空的凭据框等用户自己输。要在等待之前就置位，
-        // 否则断开过程中状态还是「连接中」，轮询可能抢先把监听重新挂上。
-        _suppressCredentialDialogFill = true;
-
-        var retryNumber = ConnectionRetryCount - _initialConnectionRetriesRemaining + 1;
-        _initialConnectionRetriesRemaining--;
-        var retryDelay = ConnectionRetryDelay;
-
-        AppLog.Warn(
-            $"分身 RDP 连接失败，将在 {retryDelay.TotalSeconds:0} 秒后重试"
-            + $"（第 {retryNumber} 次，共 {ConnectionRetryCount} 次）。"
-            + $"错误：{firstFailure.Message}，错误代码：{firstFailure.ErrorCode}，"
-            + $"扩展错误代码：{firstFailure.ExtendedErrorCode}");
-        RefreshState(
-            Locale.Format(
-                "Svc.Status.InitialRetrying",
-                retryDelay.TotalSeconds,
-                retryNumber,
-                ConnectionRetryCount));
-
-        try
-        {
-            await Task.Delay(retryDelay, cancellationToken);
-            if (_disposed
-                || generation != StartGeneration
-                || !ReferenceEquals(completion, _connectionAttemptCompletionSource)
-                || _connectionAttemptCompletionSource is null
-                || _connectionAttemptCompletionSource.Task.IsCompleted)
-            {
-                return;
-            }
-
-            RefreshState();
-            if (_desktopHost.Current is null)
-            {
-                return;
-            }
-
-            RefreshState(
-                Locale.Format("Svc.Status.InitialRetryNow", retryNumber, ConnectionRetryCount));
-            _connectionRetryInProgress = false;
-            // 新的一次尝试有自己的超时预算，否则总超时会把刚开始的重试掐掉。
-            MarkAttemptStarted();
-            // OnLogonError 触发后 ActiveX 可能仍处于连接状态，必须先断开再重连。
-            // 否则这里直接退出会丢失已捕获的真实错误，最终只剩外层连接超时。
-            _desktopHost.Current.RdpHost.ReconnectToChildSession(DesktopSize);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception exception) when (IsExpectedChildSessionException(exception))
-        {
-            var actualException = exception.GetBaseException();
-            var errorCode = actualException is COMException comException
-                ? comException.ErrorCode
-                : 0;
-            retryFailure = new ChildSessionConnectionFailedEventArgs(
-                Locale.Format("Svc.Error.InitialRetryFailed", actualException.Message),
-                errorCode);
-        }
-        finally
-        {
-            if (generation == StartGeneration
-                && ReferenceEquals(completion, _connectionAttemptCompletionSource))
-                _connectionRetryInProgress = false;
-        }
-
-        if (retryFailure is not null && generation == StartGeneration
-            && ReferenceEquals(completion, _connectionAttemptCompletionSource))
-        {
-            OnRdpConnectionFailed(this, retryFailure);
-        }
+        _autoLogin?.StopWatching();
+        AppLog.Warn($"RDP 连接将在 {delay.TotalSeconds:0} 秒后重试（第 {number} 次）。");
+        RefreshState(Locale.Format(settingsChange ? "Svc.Status.RdpReconnectRetrying" : "Svc.Status.InitialRetrying",
+            delay.TotalSeconds, number, maximum));
     }
 
     /// <summary>
@@ -1744,6 +1173,7 @@ public sealed class ChildSessionService : IDisposable
     /// </summary>
     private void CompleteConnectionFailure(ChildSessionConnectionFailedEventArgs e)
     {
+        _autoLogin?.StopWatching();
         // 统一在这里补充诊断，让「重试耗尽」和「连接超时」两条失败路径给出同样的信息。
         var diagnosed = new ChildSessionConnectionFailedEventArgs(
             $"{e.Message}{BuildFailureDiagnosis()}",
@@ -1751,19 +1181,15 @@ public sealed class ChildSessionService : IDisposable
             e.ExtendedErrorCode);
         _lastConnectionFailure = diagnosed;
         _autoLaunchPending = false;
-        _initialConnectionRetriesRemaining = 0;
-        _rdpSettingsReconnectActive = false;
-        _rdpSettingsReconnectRetryInProgress = false;
         _credentialFailureSuspected = IsLikelyCredentialFailure(diagnosed);
 
         // 留给「复制环境信息」：环境全绿却连不上时，这一行通常才是关键。
         // 用 e.Message 而不是 diagnosed.Message：后者带上了整段环境诊断，不适合塞进一行。
-        ChildSessionEnvironmentCheck.RecordConnectionFailure(
+        _platform.RecordConnectionFailure(
             e.ErrorCode,
             e.ExtendedErrorCode,
             e.Message);
 
-        _connectionAttemptCompletionSource?.TrySetResult(false);
         AppLog.Error(
             $"分身 RDP 连接失败：{diagnosed.Message}，错误代码：{diagnosed.ErrorCode}，"
             + $"扩展错误代码：{diagnosed.ExtendedErrorCode}");
@@ -1798,10 +1224,15 @@ public sealed class ChildSessionService : IDisposable
     /// <summary>
     /// 构造连接超时的失败信息，并附上 RDP ActiveX 最后报告的失败原因（如果有）。
     /// </summary>
-    private ChildSessionConnectionFailedEventArgs CreateConnectionTimeoutFailure()
+    private ChildSessionConnectionFailedEventArgs CreateConnectionTimeoutFailure(SessionConnectionPhase phase, TimeSpan budget)
     {
-        var timeoutMessage =
-            Locale.Format("Svc.Error.Timeout", ConnectionTimeout.TotalSeconds);
+        var key = phase switch
+        {
+            SessionConnectionPhase.Disconnecting => "Svc.Error.DisconnectTimeout",
+            SessionConnectionPhase.WaitingForRelease => "Svc.Error.ReleaseTimeout",
+            _ => "Svc.Error.Timeout"
+        };
+        var timeoutMessage = Locale.Format(key, budget.TotalSeconds);
         var lastDiagnostic =
             _desktopHost.Current?.RdpHost.LastConnectionDiagnostic
             ?? _lastConnectionFailure;
@@ -1826,17 +1257,17 @@ public sealed class ChildSessionService : IDisposable
     {
         var builder = new StringBuilder();
 
-        if (ChildSessionNativeMethods.TryGetChildSessionId() is null)
+        if (_platform.TryGetChildSessionId() is null)
         {
             builder.AppendLine().AppendLine();
             builder.Append(
                 Locale.Get("Svc.Diag.NoSession"));
         }
 
-        if (_environmentIssues.Count > 0)
+        if (_environment.HasIssues)
         {
             builder.AppendLine().AppendLine();
-            builder.Append(ChildSessionEnvironmentCheck.BuildSummary(_environmentIssues));
+            builder.Append(_environment.Summary);
         }
 
         return builder.ToString();
@@ -1877,40 +1308,17 @@ public sealed class ChildSessionService : IDisposable
     }
 
     private bool ReconnectForRdpSettingChange(
-        IDesktopSessionView window,
-        RdpSettingChange settingChange,
-        string operationMessage)
+        IDesktopSessionView window, RdpSettingChange settingChange, string operationMessage)
     {
         if (_sessionClosing) return false;
         RefreshState();
-        if (window.RdpHost.ConnectedState == 0 && ChildSessionId is null)
+        _pendingRdpSettingChanges |= settingChange;
+        if (window.RdpHost.ConnectedState == 0 && ChildSessionId is null && !_connection.IsActive)
         {
             RefreshState(Locale.Format("Svc.Status.SettingAppliedNextConnect", operationMessage));
             return false;
         }
-
-        var previousSettingChanges = _pendingRdpSettingChanges;
-        var previouslyActive = _rdpSettingsReconnectActive;
-        _pendingRdpSettingChanges |= settingChange;
-        _rdpSettingsReconnectActive = true;
-        _rdpSettingsReconnectRetriesRemaining = RdpSettingsReconnectRetryCount;
-        MarkAttemptStarted();
-        try
-        {
-            window.RdpHost.ReconnectToChildSession(DesktopSize);
-        }
-        catch
-        {
-            _rdpSettingsReconnectActive = previouslyActive;
-            _pendingRdpSettingChanges = previousSettingChanges;
-            if (_pendingRdpSettingChanges == RdpSettingChange.None)
-            {
-                _rdpSettingsReconnectRetriesRemaining = 0;
-            }
-
-            throw;
-        }
-
+        _ = _connection.Start(reconnect: true, settingsChange: true);
         RefreshState(Locale.Format("Svc.Status.SettingAppliedReconnecting", operationMessage));
         return true;
     }

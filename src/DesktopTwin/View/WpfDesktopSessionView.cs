@@ -68,9 +68,7 @@ internal sealed class RdpSessionClient(RdpActiveXHost host) : IRdpSessionClient
     public void SetAudioMuted(bool muted) => host.SetAudioMuted(muted);
     public void SetInputBlocked(bool enabled) => host.SetInputBlocked(enabled);
     public void ConnectToChildSession(Size size) => host.ConnectToChildSession(size);
-    public void ReconnectToChildSession(Size size) => host.ReconnectToChildSession(size);
     public void DisconnectSession() => host.DisconnectSession();
-    public void CancelPendingReconnect() => host.CancelPendingReconnect();
     public void SendShowDesktopShortcut() => host.SendShowDesktopShortcut();
     public void SendTaskViewShortcut() => host.SendTaskViewShortcut();
 }

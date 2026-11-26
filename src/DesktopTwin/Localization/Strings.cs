@@ -344,6 +344,8 @@ internal static class Strings
         Pair("Svc.Status.InitialRetryNow", "正在重试分身连接（{0}/{1}）"),
         Pair("Svc.Error.InitialRetryFailed", "重试分身连接失败：{0}"),
         Pair("Svc.Error.Timeout", "分身连接及登录初始化未能在 {0} 秒内完成。"),
+        Pair("Svc.Error.DisconnectTimeout", "RDP 控件未能在 {0} 秒内确认断开，本轮重连已停止。"),
+        Pair("Svc.Error.ReleaseTimeout", "分身会话未能在 {0} 秒内退出活动状态，本轮重连已停止。"),
         Pair("Svc.Error.TermServiceStartTimeout", "远程桌面服务没有在 {0} 秒内进入运行状态。"),
         Pair("Svc.Error.Timeout.NoDetail", "{0}\n\nRDP ActiveX 未报告更具体的失败原因。"),
         Pair("Svc.Error.Timeout.LastReport", "{0}\n\nRDP ActiveX 最后报告：\n{1}"),

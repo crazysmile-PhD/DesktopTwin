@@ -149,9 +149,7 @@ public sealed class DesktopSessionHostTests
         public void SetAudioMuted(bool enabled) => AudioMuted = enabled;
         public void SetInputBlocked(bool enabled) { }
         public void ConnectToChildSession(Size size) { }
-        public void ReconnectToChildSession(Size size) { }
         public void DisconnectSession() { }
-        public void CancelPendingReconnect() { }
         public void SendShowDesktopShortcut() { }
         public void SendTaskViewShortcut() { }
         internal void RaiseEvents(ChildSessionConnectionFailedEventArgs error)

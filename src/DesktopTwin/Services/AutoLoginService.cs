@@ -8,6 +8,7 @@ using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Automation;
+using DesktopTwin.Contracts;
 using DesktopTwin.Credentials;
 using DesktopTwin.Interop;
 using DesktopTwin.Models;
@@ -28,7 +29,7 @@ namespace DesktopTwin.Services;
 /// 第 2 条是兜底，不是主路径——它依赖对方的 UI 结构，属于「能填就填，填不了就让人自己输」，
 /// 所以有严格的重试上限，绝不无限重试。
 /// </summary>
-internal sealed class AutoLoginService : IDisposable
+internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
 {
     /// <summary>
     /// 「Windows 安全中心」凭据框的窗口类名。这个类名是实测得到的，
@@ -481,9 +482,13 @@ internal sealed class AutoLoginService : IDisposable
         return (Environment.UserName, Environment.UserDomainName);
     }
 
-    /// <summary>
-    /// 取出一组可用于 RDP 静默登录的凭据。开关关闭或没存密码时返回 false。
-    /// </summary>
+    /// <inheritdoc />
+    (string UserName, string Domain, string Password)? ISessionAutoLogin.GetCredential() =>
+        TryGetCredential(out var credential) ? (credential.UserName, credential.Domain, credential.Password) : null;
+
+    void ISessionAutoLogin.StartWatching() => StartWatching();
+
+    /// <summary>取出一组 RDP 凭据；开关关闭或没存密码时返回 false。</summary>
     public bool TryGetCredential(out RdpCredential credential)
     {
         credential = default;
