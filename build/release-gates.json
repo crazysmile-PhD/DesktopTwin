@@ -146,7 +146,7 @@
       "DesktopTwin.Tests.SessionLifecycleTests.ExpectedSessionMismatchDoesNotCancelTheCurrentStartOrLogoffAReplacement",
       "DesktopTwin.Tests.SessionLifecycleTests.ExpiredStartCannotJoinNewGeneration",
       "DesktopTwin.Tests.SessionLifecycleTests.HiddenWindowStaysHiddenAndStatusQueueIsBoundedDuringBusyUi",
-      "DesktopTwin.Tests.SessionLifecycleTests.InitialRetryGetsAFreshDeadlineAndDoesNotResubmitStoredCredentials",
+      "DesktopTwin.Tests.SessionLifecycleTests.InitialRetryGetsAFreshDeadlineAndDoesNotRestartCredentialWatcher",
       "DesktopTwin.Tests.SessionLifecycleTests.LogoffCancelsQueuedLaunchWithoutWaitingForTheNativeLaunchToFinish",
       "DesktopTwin.Tests.SessionLifecycleTests.LogoffDuringPreflightCannotEnableOrReconnectTheOldSession",
       "DesktopTwin.Tests.SessionLifecycleTests.MissingSettingsReconnectCallbackExpiresOnceAndPreservesPendingSettings",

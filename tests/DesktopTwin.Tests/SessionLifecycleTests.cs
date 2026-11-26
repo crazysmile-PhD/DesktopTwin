@@ -89,7 +89,7 @@ public sealed class SessionLifecycleTests
     }
 
     [Fact]
-    public async Task InitialRetryGetsAFreshDeadlineAndDoesNotResubmitStoredCredentials()
+    public async Task InitialRetryGetsAFreshDeadlineAndDoesNotRestartCredentialWatcher()
     {
         using var rig = new SessionTestRig();
         var failures = 0;
