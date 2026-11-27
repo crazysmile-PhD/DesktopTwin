@@ -31,6 +31,38 @@ public sealed class PresentationLifecycleTests
     }
 
     [Fact]
+    public void AutoLoginCommandsUpdateThePendingWatcherImmediately() => RunOnSta(() =>
+    {
+        using var rig = new SessionTestRig();
+        rig.Settings.Update(settings => settings with { Automation = settings.Automation with { AutoLoginEnabled = false } });
+        rig.AutoLogin.ReadEnabled = () => rig.Settings.Current.Automation.AutoLoginEnabled;
+        _ = rig.Service.StartAsync();
+        Assert.Equal(0, rig.AutoLogin.Starts);
+        using var credentials = new AutoLoginService(rig.Settings);
+        Assert.True(credentials.SavePassword("synthetic-test-password"));
+        using var viewModel = new MainWindowViewModel(rig.Service, rig.Settings, credentials);
+        var queries = rig.Platform.Queries;
+
+        Assert.True(viewModel.ToggleAutoLoginCommand.ExecuteAsync(null).IsCompletedSuccessfully);
+        Assert.True(rig.Settings.Current.Automation.AutoLoginEnabled);
+        Assert.Equal(1, rig.AutoLogin.Starts);
+        var stops = rig.AutoLogin.Stops;
+        Assert.True(viewModel.ToggleAutoLoginCommand.ExecuteAsync(null).IsCompletedSuccessfully);
+        Assert.False(rig.Settings.Current.Automation.AutoLoginEnabled);
+        Assert.Equal(stops + 1, rig.AutoLogin.Stops);
+
+        Assert.True(viewModel.ToggleAutoLoginCommand.ExecuteAsync(null).IsCompletedSuccessfully);
+        Assert.Equal(2, rig.AutoLogin.Starts);
+        stops = rig.AutoLogin.Stops;
+        viewModel.ClearAutoLoginPasswordCommand.Execute(null);
+        Assert.False(rig.Settings.Current.Automation.AutoLoginEnabled);
+        Assert.False(credentials.HasStoredPassword);
+        Assert.Equal(stops + 1, rig.AutoLogin.Stops);
+        Assert.Equal(queries, rig.Platform.Queries);
+        Assert.Single(rig.View.Client.Connections);
+    });
+
+    [Fact]
     public async Task HiddenUnconnectedFullscreenDoesNotScanForCredentials()
     {
         // WPF Application.Shutdown is process-wide; keep it out of the shared native test host.

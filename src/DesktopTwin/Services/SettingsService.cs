@@ -10,7 +10,7 @@ namespace DesktopTwin.Services;
 /// 设置读写服务。
 ///
 /// 写盘采用「延迟合并 + 显式冲刷」策略：界面上的每次开关都会调用 <see cref="Update"/>，
-/// 800 毫秒内的连续改动只写一次盘；需要立刻落盘的场景（例如在分身里启动新进程前）调用 <see cref="Flush"/>。
+/// 800 毫秒内的连续改动只写一次盘；明确需要立即持久化时调用 <see cref="Flush"/>。
 /// </summary>
 public sealed class SettingsService : IDisposable
 {

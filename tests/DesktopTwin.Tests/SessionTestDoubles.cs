@@ -190,7 +190,8 @@ internal sealed class FakeSessionAutoLogin : ISessionAutoLogin
 {
     internal int Starts { get; private set; }
     internal int Stops { get; private set; }
-    public bool IsEnabled => true;
+    internal Func<bool> ReadEnabled { get; set; } = () => true;
+    public bool IsEnabled => ReadEnabled();
     public (string UserName, string Domain, string Password)? GetCredential() => ("test", "domain", "synthetic");
     public void StartWatching() => Starts++;
     public void StopWatching() => Stops++;

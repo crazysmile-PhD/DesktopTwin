@@ -492,6 +492,14 @@ public sealed class ChildSessionService : IDisposable
         RefreshState(enabled ? Locale.Get("Svc.Status.Topmost") : Locale.Get("Svc.Status.NotTopmost"));
     }
 
+    /// <summary>更新自动登录设置，并立即同步当前连接尝试的凭据监听。</summary>
+    public void SetAutoLoginEnabled(bool enabled)
+    {
+        ThrowIfDisposed();
+        _settings.Update(settings => settings with { Automation = settings.Automation with { AutoLoginEnabled = enabled } });
+        UpdateCredentialDialogWatch();
+    }
+
     /// <summary>
     /// 切换系统组合键的发送位置。需要重连 RDP 才生效。
     /// </summary>
@@ -921,20 +929,25 @@ public sealed class ChildSessionService : IDisposable
         try
         {
             RefreshState();
-            if (_connection.Phase == SessionConnectionPhase.Connecting && ConnectedState == 2
-                && _autoLogin is { IsEnabled: true }
-                && !_connection.SuppressCredentialDialogFill)
-            {
-                _autoLogin.StartWatching();
-            }
-            else
-            {
-                _autoLogin?.StopWatching();
-            }
+            UpdateCredentialDialogWatch();
         }
         catch (Exception exception) when (IsExpectedChildSessionException(exception))
         {
             RefreshState(exception.GetBaseException().Message);
+        }
+    }
+
+    private void UpdateCredentialDialogWatch()
+    {
+        if (_connection.Phase == SessionConnectionPhase.Connecting && ConnectedState == 2
+            && _autoLogin is { IsEnabled: true }
+            && !_connection.SuppressCredentialDialogFill)
+        {
+            _autoLogin.StartWatching();
+        }
+        else
+        {
+            _autoLogin?.StopWatching();
         }
     }
 

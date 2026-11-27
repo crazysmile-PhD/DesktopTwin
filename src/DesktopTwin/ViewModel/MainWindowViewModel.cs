@@ -842,7 +842,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var autoLogin = _autoLogin;
         AutoLoginEnabled = true;
-        _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = true } });
+        _childSessionService.SetAutoLoginEnabled(true);
         ShowNotification(
                 Locale.Get("AutoLogin.Enabled.Title"),
                 Locale.Format("AutoLogin.Enabled.Message", autoLogin?.UserName),
@@ -866,7 +866,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (AutoLoginEnabled)
         {
             AutoLoginEnabled = false;
-            _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = false } });
+            _childSessionService.SetAutoLoginEnabled(false);
             ShowNotification(
                 Locale.Get("AutoLogin.Disabled.Title"),
                 Locale.Get("AutoLogin.Disabled.Message"),
@@ -898,10 +898,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearAutoLoginPassword()
     {
+        AutoLoginEnabled = false;
+        _childSessionService.SetAutoLoginEnabled(false);
         _autoLogin?.ClearPassword();
         HasAutoLoginPassword = false;
-        AutoLoginEnabled = false;
-        _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = false } });
         ShowNotification(
                 Locale.Get("AutoLogin.Cleared.Title"),
                 Locale.Get("AutoLogin.Cleared.Message"),

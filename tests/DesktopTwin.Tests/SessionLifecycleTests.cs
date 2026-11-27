@@ -64,6 +64,44 @@ public sealed class SessionLifecycleTests
         Assert.Contains(accessDenied ? "denied" : "invalid", rig.Service.StatusText);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AutoLoginChangesDoNotRestartTeardownOrSuppressedRetry(bool retry)
+    {
+        using var rig = new SessionTestRig();
+        rig.AutoLogin.ReadEnabled = () => rig.Settings.Current.Automation.AutoLoginEnabled;
+        rig.Service.SetAutoLoginEnabled(true);
+        Assert.Equal(0, rig.AutoLogin.Starts);
+        var start = rig.Service.StartAsync();
+        Assert.Equal(1, rig.AutoLogin.Starts);
+        if (retry) rig.View.Client.Fail();
+        else
+        {
+            rig.View.Client.DisconnectImmediately = false;
+            rig.Service.SetAudioMuted(true);
+        }
+
+        rig.Service.SetAutoLoginEnabled(false);
+        rig.Service.SetAutoLoginEnabled(true);
+        Assert.Equal(1, rig.AutoLogin.Starts);
+        if (retry)
+        {
+            rig.Advance(TimeSpan.FromSeconds(4));
+            rig.Service.SetAutoLoginEnabled(false);
+            rig.Service.SetAutoLoginEnabled(true);
+            Assert.Equal(1, rig.AutoLogin.Starts);
+        }
+
+        rig.View.Client.ConnectedState = 0;
+        await rig.Service.LogoffAndHideAsync();
+        await start;
+        rig.Service.SetAutoLoginEnabled(false);
+        rig.Service.SetAutoLoginEnabled(true);
+        Assert.Equal(1, rig.AutoLogin.Starts);
+        Assert.Equal(0, rig.Time.TimerCount);
+    }
+
     [Fact]
     public async Task ConcurrentStartsSharePreflightAndOneConnection()
     {
