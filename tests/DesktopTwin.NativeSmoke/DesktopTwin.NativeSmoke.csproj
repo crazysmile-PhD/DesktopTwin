@@ -5,8 +5,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/DesktopTwin/DesktopTwin.csproj" />
+    <Compile Include="../DesktopTwin.Tests/SessionTestDoubles.cs" Link="SessionTestDoubles.cs" />
   </ItemGroup>
 </Project>

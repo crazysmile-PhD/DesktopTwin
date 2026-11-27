@@ -486,8 +486,6 @@ internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
     (string UserName, string Domain, string Password)? ISessionAutoLogin.GetCredential() =>
         TryGetCredential(out var credential) ? (credential.UserName, credential.Domain, credential.Password) : null;
 
-    void ISessionAutoLogin.StartWatching() => StartWatching();
-
     /// <summary>取出一组 RDP 凭据；开关关闭或没存密码时返回 false。</summary>
     public bool TryGetCredential(out RdpCredential credential)
     {
@@ -595,18 +593,9 @@ internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
     /// <summary>
     /// 开始监听凭据弹窗。每次连接尝试调用一次。
     /// </summary>
-    /// <param name="force">
-    /// 忽略「自动登录已启用」这个前提。用于「保存并验证」——那时开关可能还没打开，
-    /// 但同样需要自动填充。
-    /// </param>
-    public void StartWatching(bool force = false)
+    public void StartWatching()
     {
-        if (_disposed || _watch.IsStarted || !HasStoredPassword)
-        {
-            return;
-        }
-
-        if (!force && !IsEnabled)
+        if (_disposed || _watch.IsStarted || !IsEnabled || !HasStoredPassword)
         {
             return;
         }
@@ -652,7 +641,7 @@ internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
                 return;
             }
 
-            if (token.IsCancellationRequested)
+            if (token.IsCancellationRequested || !IsEnabled)
             {
                 return;
             }
@@ -819,7 +808,7 @@ internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
         return IntPtr.Zero;
     }
 
-    private static bool TrySetValue(AutomationElement element, string value, bool onlyWhenEmpty, CancellationToken token)
+    private bool TrySetValue(AutomationElement element, string value, bool onlyWhenEmpty, CancellationToken token)
     {
         try
         {
@@ -839,7 +828,7 @@ internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
                 return true;
             }
 
-            if (token.IsCancellationRequested) return false;
+            if (token.IsCancellationRequested || !IsEnabled) return false;
             valuePattern.SetValue(value);
             return true;
         }
@@ -858,7 +847,7 @@ internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
     /// 框里又有「取消」时，取第一个等于替用户点了取消，而调用方还会把它记成
     /// 「已经填过」，这一轮就再也不会重试。
     /// </summary>
-    private static bool TryInvokeConfirm(AutomationElement dialog, CancellationToken token)
+    private bool TryInvokeConfirm(AutomationElement dialog, CancellationToken token)
     {
         var buttons = dialog.FindAll(
             TreeScope.Descendants,
@@ -938,7 +927,7 @@ internal sealed class AutoLoginService : IDisposable, ISessionAutoLogin
                 return false;
             }
 
-            if (token.IsCancellationRequested) return false;
+            if (token.IsCancellationRequested || !IsEnabled) return false;
             invokePattern.Invoke();
             return true;
         }

@@ -49,6 +49,7 @@ internal sealed class RdpActiveXHost : AxHost
     internal event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed;
 
     internal event EventHandler? LoginCompleted;
+    internal event EventHandler? ConnectionStateChanged;
 
     internal ChildSessionConnectionFailedEventArgs? LastConnectionDiagnostic =>
         _lastConnectionDiagnostic;
@@ -973,10 +974,12 @@ internal sealed class RdpActiveXHost : AxHost
     {
         public void OnConnecting()
         {
+            owner.ConnectionStateChanged?.Invoke(owner, EventArgs.Empty);
         }
 
         public void OnConnected()
         {
+            owner.ConnectionStateChanged?.Invoke(owner, EventArgs.Empty);
         }
 
         public void OnLoginComplete()
@@ -986,7 +989,8 @@ internal sealed class RdpActiveXHost : AxHost
 
         public void OnDisconnected(int disconnectReason)
         {
-            owner.OnDisconnected(disconnectReason);
+            try { owner.OnDisconnected(disconnectReason); }
+            finally { owner.ConnectionStateChanged?.Invoke(owner, EventArgs.Empty); }
         }
 
         public void OnEnterFullScreenMode()

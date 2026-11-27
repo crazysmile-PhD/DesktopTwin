@@ -8,6 +8,101 @@ namespace DesktopTwin.Tests;
 public sealed class SessionLifecycleTests
 {
     [Fact]
+    public async Task SettingsWriteFailureDoesNotPreventExplicitProgramLaunch()
+    {
+        using var rig = new SessionTestRig();
+        rig.Platform.SessionId = 17;
+        rig.Settings.Update(settings => settings with { Window = settings.Window with { SmallWindowMode = true } });
+        var blocked = rig.Settings.SettingsPath + ".tmp";
+        System.IO.Directory.CreateDirectory(blocked);
+        try
+        {
+            Assert.Throws<UnauthorizedAccessException>(rig.Settings.Flush);
+            await rig.Service.LaunchProgramAsync("synthetic.exe", false);
+            Assert.Equal("synthetic.exe", Assert.Single(rig.Platform.Launches).Path);
+            Assert.False(System.IO.File.Exists(rig.Settings.SettingsPath));
+        }
+        finally { System.IO.Directory.Delete(blocked); }
+        rig.Settings.Flush();
+        Assert.True(System.IO.File.Exists(rig.Settings.SettingsPath));
+    }
+
+    [Fact]
+    public async Task IdleAndConnectedSessionsDoNotPollAndDisconnectUpdatesImmediately()
+    {
+        using var rig = new SessionTestRig();
+        var queries = rig.Platform.Queries;
+        rig.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(queries, rig.Platform.Queries);
+        Assert.Equal(0, rig.Time.TimerCount);
+        var start = rig.Service.StartAsync();
+        rig.Platform.SessionId = 17;
+        rig.Platform.SessionActive = true;
+        rig.View.Client.Login();
+        await start;
+        queries = rig.Platform.Queries;
+        rig.Advance(TimeSpan.FromMinutes(1));
+        Assert.Equal(queries, rig.Platform.Queries);
+        Assert.Equal(0, rig.Time.TimerCount);
+        rig.Platform.SessionId = null;
+        rig.View.Client.ChangeConnectionState(0);
+        Assert.Null(rig.Service.ChildSessionId);
+        Assert.Equal(0, rig.Service.ConnectedState);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SynchronousArgumentAndAccessFailuresDoNotRetry(bool accessDenied)
+    {
+        using var rig = new SessionTestRig();
+        rig.View.Client.ConnectError = accessDenied ? new UnauthorizedAccessException("denied") : new ArgumentException("invalid");
+        await rig.Service.StartAsync();
+        rig.Advance(TimeSpan.FromMinutes(3));
+        Assert.Single(rig.View.Client.Connections);
+        Assert.Equal(0, rig.Time.TimerCount);
+        Assert.Contains(accessDenied ? "denied" : "invalid", rig.Service.StatusText);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AutoLoginChangesDoNotRestartTeardownOrSuppressedRetry(bool retry)
+    {
+        using var rig = new SessionTestRig();
+        rig.AutoLogin.ReadEnabled = () => rig.Settings.Current.Automation.AutoLoginEnabled;
+        rig.Service.SetAutoLoginEnabled(true);
+        Assert.Equal(0, rig.AutoLogin.Starts);
+        var start = rig.Service.StartAsync();
+        Assert.Equal(1, rig.AutoLogin.Starts);
+        if (retry) rig.View.Client.Fail();
+        else
+        {
+            rig.View.Client.DisconnectImmediately = false;
+            rig.Service.SetAudioMuted(true);
+        }
+
+        rig.Service.SetAutoLoginEnabled(false);
+        rig.Service.SetAutoLoginEnabled(true);
+        Assert.Equal(1, rig.AutoLogin.Starts);
+        if (retry)
+        {
+            rig.Advance(TimeSpan.FromSeconds(4));
+            rig.Service.SetAutoLoginEnabled(false);
+            rig.Service.SetAutoLoginEnabled(true);
+            Assert.Equal(1, rig.AutoLogin.Starts);
+        }
+
+        rig.View.Client.ConnectedState = 0;
+        await rig.Service.LogoffAndHideAsync();
+        await start;
+        rig.Service.SetAutoLoginEnabled(false);
+        rig.Service.SetAutoLoginEnabled(true);
+        Assert.Equal(1, rig.AutoLogin.Starts);
+        Assert.Equal(0, rig.Time.TimerCount);
+    }
+
+    [Fact]
     public async Task ConcurrentStartsSharePreflightAndOneConnection()
     {
         using var rig = new SessionTestRig();
@@ -271,7 +366,8 @@ public sealed class SessionLifecycleTests
         Assert.False(rig.View.IsVisible);
         Assert.Equal(1, rig.View.ShowCalls);
         rig.Time.Advance(TimeSpan.FromSeconds(5));
-        Assert.Equal(1, rig.Dispatcher.QueuedCount);
+        // The only connection timer is its deadline; idle status reads no longer queue UI work.
+        Assert.Equal(0, rig.Dispatcher.QueuedCount);
         rig.Dispatcher.Drain();
         rig.View.Client.Login();
         await start;

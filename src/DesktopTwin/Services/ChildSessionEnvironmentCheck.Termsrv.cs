@@ -62,16 +62,29 @@ public static partial class ChildSessionEnvironmentCheck
     private static int _termsrvGeneration;
     private static bool _termsrvVerifyRunning;
 
-    /// <summary>已验证结果缓存 5 分钟；未验证的 30 秒后重试。</summary>
+    /// <summary>已验证结果缓存 5 分钟；未验证结果 30 秒后允许显式重检。</summary>
     private static readonly TimeSpan TermsrvVerifiedTtl = TimeSpan.FromMinutes(5);
 
     private static readonly TimeSpan TermsrvUnverifiedTtl = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// 取 termsrv.dll 的状态。第一次调用会返回「未验证」并在后台开始校验，
-    /// 下一轮轮询（2 秒后）就能拿到结果。
+    /// 读取已有证据；过期或未校验时返回未知，不隐式启动系统扫描。
     /// </summary>
     internal static TermsrvFileState GetTermsrvState()
+    {
+        var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        lock (TermsrvGate)
+        {
+            var ttl = _termsrvState.Verified ? TermsrvVerifiedTtl : TermsrvUnverifiedTtl;
+            var current = _termsrvState with { Backups = CollectTermsrvBackups(system32) };
+            if (_termsrvVerifyRunning || DateTime.UtcNow - _termsrvStateAt >= ttl)
+                return new TermsrvFileState(File.Exists(Path.Combine(system32, "termsrv.dll")), false, false, current.Backups);
+            return current;
+        }
+    }
+
+    /// <summary>显式重新检测时请求有界后台校验；普通快照读取没有此副作用。</summary>
+    internal static void RequestTermsrvVerification()
     {
         var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
         var termsrvPath = Path.Combine(system32, "termsrv.dll");
@@ -86,11 +99,6 @@ public static partial class ChildSessionEnvironmentCheck
                 _termsrvVerifyRunning = true;
                 var backups = CollectTermsrvBackups(system32);
                 var generation = _termsrvGeneration;
-
-                // 列表同步写回：校验要跑几秒，这期间修复侧来读 GetTermsrvState 时
-                // 走的是「校验中」分支，返回的就是 _termsrvState.Backups——
-                // 不写回的话它拿到的还是上一轮的旧列表。
-                _termsrvState = _termsrvState with { Backups = backups };
 
                 _ = Task.Run(() =>
                 {
@@ -145,23 +153,6 @@ public static partial class ChildSessionEnvironmentCheck
                     TermsrvVerificationCompleted?.Invoke(null, EventArgs.Empty);
                 });
             }
-
-            if (_termsrvVerifyRunning)
-            {
-                // 校验正在进行（首次校验，或 5 分钟 TTL 到期后的重新校验）：手上这份结论
-                // 已经不是当前系统的事实了，不能当成新结论交出去——否则面板会先按缓存渲染
-                // 一条问题，等校验完成再把它撤掉。
-                return new TermsrvFileState(File.Exists(termsrvPath), false, false, _termsrvState.Backups);
-            }
-
-            if (_termsrvState.Exists || _termsrvState.Verified)
-            {
-                return _termsrvState;
-            }
-
-            // 还没跑过：先给出「文件在不在」这个廉价结论。
-            var backupsNow = _termsrvState.Backups;
-            return new TermsrvFileState(File.Exists(termsrvPath), false, false, backupsNow);
         }
     }
 
@@ -180,7 +171,7 @@ public static partial class ChildSessionEnvironmentCheck
     }
 
     /// <summary>
-    /// 清掉缓存，让下一次读取重新校验。
+    /// 清掉缓存；下一次显式重检才启动校验。
     ///
     /// 用户点「重新检测」时要调：结论默认缓存 5 分钟，用户在别处把文件修好了，
     /// 不清缓存就会一直显示旧警告和一个点了也修不动的「修复」按钮。
@@ -192,7 +183,7 @@ public static partial class ChildSessionEnvironmentCheck
             _termsrvStateAt = DateTime.MinValue;
 
             // 作废正在跑的那轮：它的结论是失效之前的事实，不能写回来。
-            // 同时放下标志，让下一次读取能立刻发起新的校验。
+            // 同时放下标志，让下一次显式重检能发起新的校验。
             _termsrvGeneration++;
             _termsrvVerifyRunning = false;
         }

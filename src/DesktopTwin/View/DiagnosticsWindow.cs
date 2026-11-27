@@ -348,7 +348,11 @@ internal sealed class DiagnosticsWindow : FluentWindow
         _invalidateScan = false;
         return Task.Run(() =>
         {
-            if (invalidate) ChildSessionEnvironmentCheck.InvalidateScanCache();
+            if (invalidate)
+            {
+                ChildSessionEnvironmentCheck.InvalidateScanCache();
+                ChildSessionEnvironmentCheck.RequestTermsrvVerification();
+            }
             var issues = _showAll
                 ? ChildSessionEnvironmentCheck.CollectAll(credentialHint)
                 : ChildSessionEnvironmentCheck.Collect(credentialHint);

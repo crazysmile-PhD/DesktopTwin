@@ -11,7 +11,7 @@
                  xmlns:viewModel="clr-namespace:DesktopTwin.ViewModel"
                  xmlns:wfi="clr-namespace:System.Windows.Forms.Integration;assembly=WindowsFormsIntegration"
                  Title="{loc:Loc Main.Title}"
-                 Icon="pack://application:,,,/Assets/DesktopTwin.ico"
+                 Icon="pack://application:,,,/DesktopTwin;component/Assets/DesktopTwin.ico"
                  Width="1280"
                  Height="752"
                  MinWidth="415"

@@ -15,6 +15,16 @@ namespace DesktopTwin.Tests;
 public sealed class EnvironmentCheckTests
 {
     [Fact]
+    public void ReadingTermsrvSnapshotDoesNotStartSystemVerification()
+    {
+        ChildSessionEnvironmentCheck.InvalidateTermsrvCache();
+        var snapshot = ChildSessionEnvironmentCheck.GetTermsrvState();
+        Assert.False(snapshot.Verified);
+        Assert.False(ChildSessionEnvironmentCheck.IsTermsrvVerifying);
+        Assert.Equal(System.IO.File.Exists(NativePath), snapshot.Exists);
+    }
+
+    [Fact]
     public async Task ConnectionPreflightDoesNotWaitForDiagnosticScans()
     {
         var type = typeof(ChildSessionEnvironmentCheck);

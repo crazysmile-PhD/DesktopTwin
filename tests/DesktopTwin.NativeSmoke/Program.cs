@@ -5,14 +5,18 @@ using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using DesktopTwin.Tests;
+using DesktopTwin.View;
+using DesktopTwin.ViewModel;
 
 internal static class Program
 {
     [STAThread]
-    private static int Main()
+    private static int Main(string[] args)
     {
         try
         {
+            if (args.Length == 1 && args[0] == "--presentation-lifecycle") return CheckPresentationLifecycle();
             const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Instance;
             var assembly = typeof(DesktopTwin.Models.AppSettings).Assembly;
             var type = assembly.GetType("DesktopTwin.Interop.RdpActiveXHost", throwOnError: true)!;
@@ -68,6 +72,44 @@ internal static class Program
         {
             Console.Error.WriteLine(exception.GetBaseException());
             return 1;
+        }
+    }
+
+    private static int CheckPresentationLifecycle()
+    {
+        var application = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown };
+        application.Resources["BooleanToVisibilityConverter"] = new System.Windows.Controls.BooleanToVisibilityConverter();
+        application.Resources["BooleanToVisibilityRevertConverter"] = new DesktopTwin.View.Converters.BooleanToVisibilityRevertConverter();
+        using var rig = new SessionTestRig();
+        var viewModel = new MainWindowViewModel(rig.Service, rig.Settings);
+        var window = new MainWindow(rig.Service, rig.Settings, viewModel);
+        try
+        {
+            window.EnterFullscreen();
+            if (window.IsVisible || window.CredentialDialogWatchEnabled)
+                throw new InvalidOperationException("Hidden unconnected fullscreen must not scan for credentials.");
+            window.Hide();
+            if (window.CredentialDialogWatchEnabled)
+                throw new InvalidOperationException("Hidden credential observation did not stop.");
+            window.ExitFullscreen();
+            rig.View.Client.ConnectError = new ArgumentException("synthetic configuration error");
+            if (!rig.Service.StartAsync().IsCompletedSuccessfully)
+                throw new InvalidOperationException("Synchronous configuration failure was not completed.");
+            // Drain the queued failure only after disposal: it must not reopen UI or restart a timer.
+            viewModel.Dispose();
+            application.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+            if (viewModel.IsNotificationActive || application.Windows.OfType<DiagnosticsWindow>().Any())
+                throw new InvalidOperationException("Disposed presentation received a queued failure.");
+            if (window.RdpHost.ConnectedState != 0)
+                throw new InvalidOperationException("Probe unexpectedly established a connection.");
+            Console.WriteLine("PASS: hidden credential observation and disposed notifications; Connected=0.");
+            return 0;
+        }
+        finally
+        {
+            window.AllowClose = true;
+            window.Close();
+            application.Shutdown();
         }
     }
 }

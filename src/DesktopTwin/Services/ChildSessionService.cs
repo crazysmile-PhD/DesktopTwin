@@ -29,7 +29,6 @@ public sealed class ChildSessionService : IDisposable
     private readonly ISessionDispatcher _dispatcher;
     private readonly TimeProvider _timeProvider;
     private readonly SessionConnection _connection;
-    private readonly ITimer _statusTimer;
     private readonly SemaphoreSlim _launchSemaphore = new(1, 1);
 
     /// <summary>
@@ -93,7 +92,6 @@ public sealed class ChildSessionService : IDisposable
 
     private RdpSettingChange _pendingRdpSettingChanges;
 
-    private bool _statusTickInProgress;
     private bool _disposed;
     private string? _lastOperationMessage;
     private SessionEnvironment _environment = SessionEnvironment.Empty;
@@ -272,6 +270,7 @@ public sealed class ChildSessionService : IDisposable
         _desktopHost.VisibilityChanged += OnDesktopWindowVisibilityChanged;
         _desktopHost.ConnectionFailed += OnRdpConnectionFailed;
         _desktopHost.LoginCompleted += OnRdpLoginCompleted;
+        _desktopHost.ConnectionStateChanged += OnRdpConnectionStateChanged;
         _desktopHost.DesktopSizeChanged += OnRdpDesktopSizeChanged;
         _connection = new SessionConnection(dispatcher, timeProvider,
             () => EnsureDesktopWindow().RdpHost, () => DesktopSize,
@@ -280,9 +279,6 @@ public sealed class ChildSessionService : IDisposable
         _connection.Failed += (_, error) => CompleteConnectionFailure(error);
         _connection.Retrying += OnConnectionRetrying;
         SendSystemShortcutsToRemote = settings.Current.Session.SendSystemShortcutsToRemote;
-        // One queued status read at a time even if the UI is busy for several timer periods.
-        _statusTimer = timeProvider.CreateTimer(_ => QueueStatusRefresh(), null,
-            TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
         RefreshState();
     }
 
@@ -494,6 +490,14 @@ public sealed class ChildSessionService : IDisposable
         ThrowIfDisposed();
         _settings.Update(s => s with { Session = s.Session with { Topmost = enabled } });
         RefreshState(enabled ? Locale.Get("Svc.Status.Topmost") : Locale.Get("Svc.Status.NotTopmost"));
+    }
+
+    /// <summary>更新自动登录设置，并立即同步当前连接尝试的凭据监听。</summary>
+    public void SetAutoLoginEnabled(bool enabled)
+    {
+        ThrowIfDisposed();
+        _settings.Update(settings => settings with { Automation = settings.Automation with { AutoLoginEnabled = enabled } });
+        UpdateCredentialDialogWatch();
     }
 
     /// <summary>
@@ -860,7 +864,6 @@ public sealed class ChildSessionService : IDisposable
         InvalidateSessionOperations();
 
         _disposed = true;
-        _statusTimer.Dispose();
         _connection.Dispose();
         _autoLogin?.StopWatching();
         _disposeCancellationTokenSource.Cancel();
@@ -872,6 +875,7 @@ public sealed class ChildSessionService : IDisposable
             _desktopHost.VisibilityChanged -= OnDesktopWindowVisibilityChanged;
             _desktopHost.ConnectionFailed -= OnRdpConnectionFailed;
             _desktopHost.LoginCompleted -= OnRdpLoginCompleted;
+            _desktopHost.ConnectionStateChanged -= OnRdpConnectionStateChanged;
             _desktopHost.DesktopSizeChanged -= OnRdpDesktopSizeChanged;
             TryDisconnectRdpHost();
         }
@@ -909,8 +913,9 @@ public sealed class ChildSessionService : IDisposable
         _autoLaunchPending = existingSessionId is null
             && _settings.Current.Launch.AutoLaunchOnConnect
             && !string.IsNullOrWhiteSpace(_settings.Current.Launch.TargetPath);
+        _lastOperationMessage = operationMessage;
         var task = _connection.Start(reconnect: window.RdpHost.ConnectedState != 0);
-        RefreshState(operationMessage);
+        RefreshState();
         return task;
     }
 
@@ -918,53 +923,31 @@ public sealed class ChildSessionService : IDisposable
 
     private static void ShowDesktopWindow(IDesktopSessionView window) => window.ShowAndActivate();
 
-    private int _statusRefreshQueued;
-
-    private void QueueStatusRefresh()
+    private void OnRdpConnectionStateChanged(object? sender, EventArgs e)
     {
-        if (Interlocked.Exchange(ref _statusRefreshQueued, 1) != 0) return;
-        _dispatcher.Post(() =>
-        {
-            Interlocked.Exchange(ref _statusRefreshQueued, 0);
-            OnStatusTimerTick();
-        });
-    }
-
-    private void OnStatusTimerTick()
-    {
-        if (_statusTickInProgress || _disposed)
-        {
-            return;
-        }
-
-        _statusTickInProgress = true;
+        if (_disposed) return;
         try
         {
             RefreshState();
-
-            // 连接中且开了自动登录：开始盯着可能出现的凭据弹窗。
-            // 放在状态轮询里而不是每个连接入口各写一遍，重连、重试、设置变更全覆盖。
-            // 重试这一轮例外：它的意义就是让用户重新输一次，自动填会把同一份（很可能
-            // 已经失效的）密码再提交一遍，白白多一次失败登录。
-            if (_connection.Phase == SessionConnectionPhase.Connecting && ConnectedState == 2
-                && _autoLogin is { IsEnabled: true }
-                && !_connection.SuppressCredentialDialogFill)
-            {
-                _autoLogin.StartWatching();
-            }
-            else
-            {
-                // 断开、释放、退避及空闲阶段都没有待提交的登录，不监听本机凭据框。
-                _autoLogin?.StopWatching();
-            }
+            UpdateCredentialDialogWatch();
         }
         catch (Exception exception) when (IsExpectedChildSessionException(exception))
         {
             RefreshState(exception.GetBaseException().Message);
         }
-        finally
+    }
+
+    private void UpdateCredentialDialogWatch()
+    {
+        if (_connection.Phase == SessionConnectionPhase.Connecting && ConnectedState == 2
+            && _autoLogin is { IsEnabled: true }
+            && !_connection.SuppressCredentialDialogFill)
         {
-            _statusTickInProgress = false;
+            _autoLogin.StartWatching();
+        }
+        else
+        {
+            _autoLogin?.StopWatching();
         }
     }
 
@@ -989,9 +972,6 @@ public sealed class ChildSessionService : IDisposable
         {
             if (_disposed || _sessionClosing || generation != StartGeneration) return;
             var childSessionId = GetRequiredChildSessionId();
-
-            // 目标程序可能读取同一个程序目录下的配置，启动前先把设置刷到磁盘。
-            _settings.Flush();
 
             var fileName = Path.GetFileName(executablePath);
             RefreshState(isAutomatic
@@ -1318,8 +1298,10 @@ public sealed class ChildSessionService : IDisposable
             RefreshState(Locale.Format("Svc.Status.SettingAppliedNextConnect", operationMessage));
             return false;
         }
+        _autoLogin?.StopWatching();
+        _lastOperationMessage = Locale.Format("Svc.Status.SettingAppliedReconnecting", operationMessage);
         _ = _connection.Start(reconnect: true, settingsChange: true);
-        RefreshState(Locale.Format("Svc.Status.SettingAppliedReconnecting", operationMessage));
+        RefreshState();
         return true;
     }
 

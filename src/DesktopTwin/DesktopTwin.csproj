@@ -42,6 +42,7 @@
 	<ItemGroup>
 		<!-- 让测试能直接调用 internal 的安全守卫，而不必把它们提升成公共 API -->
 		<InternalsVisibleTo Include="DesktopTwin.Tests" />
+		<InternalsVisibleTo Include="DesktopTwin.NativeSmoke" />
 		<Compile Include="..\Shared\SessionLaunchProtocol.cs" Link="Launching\SessionLaunchProtocol.cs" />
 		<Compile Include="..\Shared\ProcessCreationIdentity.cs" Link="Launching\ProcessCreationIdentity.cs" />
 		<Compile Include="..\Shared\RelativeInputProtocol.cs" Link="Input\RelativeInputProtocol.cs" />

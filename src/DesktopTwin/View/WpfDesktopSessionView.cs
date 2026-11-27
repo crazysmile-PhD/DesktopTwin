@@ -57,6 +57,11 @@ internal sealed class RdpSessionClient(RdpActiveXHost host) : IRdpSessionClient
         add => host.LoginCompleted += value;
         remove => host.LoginCompleted -= value;
     }
+    public event EventHandler? ConnectionStateChanged
+    {
+        add => host.ConnectionStateChanged += value;
+        remove => host.ConnectionStateChanged -= value;
+    }
     public event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed
     {
         add => host.ConnectionFailed += value;

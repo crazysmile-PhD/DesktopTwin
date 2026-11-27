@@ -24,6 +24,8 @@ internal interface IRdpSessionClient
     int ConnectedState { get; }
     ChildSessionConnectionFailedEventArgs? LastConnectionDiagnostic { get; }
     event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed;
+    /// <summary>Reports native connection transitions, including normal disconnection, on the UI thread.</summary>
+    event EventHandler? ConnectionStateChanged;
     event EventHandler? LoginCompleted;
     void SetCredentialProvider(Func<(string UserName, string Domain, string Password)?>? provider);
     void SetSmartSizing(bool enabled);

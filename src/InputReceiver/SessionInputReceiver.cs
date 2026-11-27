@@ -43,20 +43,32 @@ namespace DesktopTwinInputReceiver
                     writer.Write(session);
                     writer.Write(Process.GetCurrentProcess().Id);
                     writer.Flush();
-                    long lastPacket = Stopwatch.GetTimestamp();
-                    int received = 0;
-                    using (var watchdog = new Timer(delegate
+                    long expiresAt = Stopwatch.GetTimestamp() + 20 * Stopwatch.Frequency;
+                    Timer watchdog = null;
+                    watchdog = new Timer(delegate
                     {
-                        if ((Stopwatch.GetTimestamp() - Interlocked.Read(ref lastPacket)) * 1000 / Stopwatch.Frequency
-                            > (Volatile.Read(ref received) == 0 ? 20000 : RelativeInputProtocol.LeaseMilliseconds)) pipe.Dispose();
-                    }, null, 250, 250))
+                        var deadline = Interlocked.Read(ref expiresAt);
+                        if (deadline == long.MaxValue) return;
+                        var remaining = (deadline - Stopwatch.GetTimestamp()) * 1000 / Stopwatch.Frequency;
+                        if (remaining <= 0) { pipe.Dispose(); return; }
+                        try { watchdog.Change((int)remaining + 1, Timeout.Infinite); }
+                        catch (ObjectDisposedException) { }
+                    }, null, 20000, Timeout.Infinite);
+                    using (watchdog)
                     {
                         while (true)
                         {
                             var packet = RelativeInputProtocol.ReadPacket(reader);
-                            Interlocked.Exchange(ref lastPacket, Stopwatch.GetTimestamp());
-                            Interlocked.Exchange(ref received, 1);
+                            var receivedAt = Stopwatch.GetTimestamp();
+                            var wasArmed = lease.Armed;
                             lease.Apply(packet);
+                            Interlocked.Exchange(ref expiresAt, lease.Armed
+                                ? receivedAt + RelativeInputProtocol.LeaseMilliseconds * Stopwatch.Frequency / 1000
+                                : long.MaxValue);
+                            // Disarmed peers hold no injected state: block on the pipe until input or EOF.
+                            // Active traffic only renews the deadline; one callback observes its latest value.
+                            if (!lease.Armed) watchdog.Change(Timeout.Infinite, Timeout.Infinite);
+                            else if (!wasArmed) watchdog.Change(RelativeInputProtocol.LeaseMilliseconds, Timeout.Infinite);
                             statusBuffer.Position = 0;
                             ReceiverInput.WriteStatus(statusWriter, session, lease);
                             pipe.Write(statusBytes, 0, statusBytes.Length);

@@ -6,9 +6,38 @@ using DesktopTwin.Services;
 
 namespace DesktopTwin.Tests;
 
-/// <summary>Real bundled process/pipe tests; never arm or inject input into the user's desktop.</summary>
+/// <summary>Real bundled process/pipe tests; heartbeat leases never send input transitions to the desktop.</summary>
 public sealed class RelativeInputReceiverTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedLaunchIsReportedWithoutWaitingForHandshake(bool connectWithoutHello)
+    {
+        var failure = new IOException("synthetic launch failure");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        NamedPipeClientStream? client = null;
+        try
+        {
+            var error = await Record.ExceptionAsync(async () =>
+            {
+                using var session = await RelativeInputSession.ConnectAsync((uint)Process.GetCurrentProcess().SessionId,
+                    timeout.Token, async (_, arguments, token) =>
+                    {
+                        if (connectWithoutHello)
+                        {
+                            client = new NamedPipeClientStream(".", arguments.Split(' ')[1], PipeDirection.InOut, PipeOptions.Asynchronous);
+                            await client.ConnectAsync(token);
+                        }
+                        throw failure;
+                    });
+            });
+            Assert.Same(failure, error);
+            Assert.False(timeout.IsCancellationRequested);
+        }
+        finally { client?.Dispose(); }
+    }
+
     [Fact]
     public async Task BootstrapClosesFailedReceiverAndRetriesItsCreationReceiptOnlyOnce()
     {
@@ -84,6 +113,12 @@ public sealed class RelativeInputReceiverTests
             Assert.Equal(Process.GetCurrentProcess().SessionId, session.Status.SessionId);
             Assert.Equal(0, session.Status.InjectedMoves);
             Assert.Equal(0, session.Status.HeldCount);
+            var initialStatus = session.Status;
+            // Longer than the active lease: an unarmed peer must survive without background exchanges.
+            await Task.Delay(1800, deadline.Token);
+            Assert.Same(initialStatus, session.Status);
+            Assert.NotNull(receiver);
+            Assert.False(receiver.HasExited);
             session.Dispose();
             Assert.NotNull(receiver);
             await receiver.WaitForExitAsync(deadline.Token);
@@ -112,7 +147,8 @@ public sealed class RelativeInputReceiverTests
             var hello = new byte[12];
             await pipe.ReadExactlyAsync(hello, timeout.Token);
             using var writer = new BinaryWriter(pipe, System.Text.Encoding.UTF8, leaveOpen: true);
-            RelativeInputProtocol.WritePacket(writer, new(InputOperation.Heartbeat, 0));
+            // Authorize a lease without sending any key/button/move; expiry still closes the channel.
+            RelativeInputProtocol.WritePacket(writer, new(InputOperation.Heartbeat, 1));
             var status = new byte[RelativeInputProtocol.StatusBytes];
             await pipe.ReadExactlyAsync(status, timeout.Token);
             await receiver.WaitForExitAsync(timeout.Token);

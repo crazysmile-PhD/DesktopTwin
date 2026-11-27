@@ -82,7 +82,8 @@ internal sealed class SessionConnection(
         catch (Exception error)
         {
             var failure = new ChildSessionConnectionFailedEventArgs(error.GetBaseException().Message, error.HResult);
-            if (Phase == SessionConnectionPhase.Connecting) ReportFailure(failure);
+            if (Phase == SessionConnectionPhase.Connecting
+                && error.GetBaseException() is not (ArgumentException or UnauthorizedAccessException)) ReportFailure(failure);
             else Fail(failure);
         }
     }

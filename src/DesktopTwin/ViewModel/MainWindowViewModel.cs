@@ -669,6 +669,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (_disposed) return;
         _disposed = true;
         _notificationTimer.Stop();
+        _notificationTimer.Tick -= OnNotificationTimerTick;
+        _childSessionService.StateChanged -= OnChildSessionStateChanged;
+        _childSessionService.ConnectionFailed -= OnChildSessionConnectionFailed;
+        _childSessionService.SystemShortcutsReconnectCompleted -= OnSystemShortcutsReconnectCompleted;
+        _childSessionService.AudioReconnectCompleted -= OnAudioReconnectCompleted;
+        _childSessionService.AutoLaunchSkipped -= OnAutoLaunchSkipped;
         _childSessionService.DesktopSizeChanged -= OnDesktopSizeChanged;
     }
 
@@ -836,7 +842,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var autoLogin = _autoLogin;
         AutoLoginEnabled = true;
-        _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = true } });
+        _childSessionService.SetAutoLoginEnabled(true);
         ShowNotification(
                 Locale.Get("AutoLogin.Enabled.Title"),
                 Locale.Format("AutoLogin.Enabled.Message", autoLogin?.UserName),
@@ -860,7 +866,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         if (AutoLoginEnabled)
         {
             AutoLoginEnabled = false;
-            _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = false } });
+            _childSessionService.SetAutoLoginEnabled(false);
             ShowNotification(
                 Locale.Get("AutoLogin.Disabled.Title"),
                 Locale.Get("AutoLogin.Disabled.Message"),
@@ -892,10 +898,10 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void ClearAutoLoginPassword()
     {
+        AutoLoginEnabled = false;
+        _childSessionService.SetAutoLoginEnabled(false);
         _autoLogin?.ClearPassword();
         HasAutoLoginPassword = false;
-        AutoLoginEnabled = false;
-        _settings.Update(s => s with { Automation = s.Automation with { AutoLoginEnabled = false } });
         ShowNotification(
                 Locale.Get("AutoLogin.Cleared.Title"),
                 Locale.Get("AutoLogin.Cleared.Message"),
@@ -1348,6 +1354,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnChildSessionStateChanged(object? sender, EventArgs e)
     {
+        if (_disposed) return;
         if (Application.Current.Dispatcher.CheckAccess())
         {
             UpdateConnectionStatus();
@@ -1356,7 +1363,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
         _ = Application.Current.Dispatcher.BeginInvoke(() =>
         {
-            UpdateConnectionStatus();
+            if (!_disposed) UpdateConnectionStatus();
         });
     }
 
@@ -1364,10 +1371,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
         object? sender,
         ChildSessionConnectionFailedEventArgs e)
     {
+        if (_disposed) return;
         _ = Application.Current.Dispatcher.BeginInvoke(
             DispatcherPriority.Normal,
             new Action(() =>
             {
+                if (_disposed) return;
                 IsSystemShortcutsReconnectPending = false;
                 IsAudioReconnectPending = false;
                 UpdateConnectionStatus();
@@ -1411,10 +1420,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnSystemShortcutsReconnectCompleted(object? sender, EventArgs e)
     {
+        if (_disposed) return;
         _ = Application.Current.Dispatcher.BeginInvoke(
             DispatcherPriority.Normal,
             new Action(() =>
             {
+                if (_disposed) return;
                 IsSystemShortcutsReconnectPending = false;
                 UpdateConnectionStatus();
                 ShowNotification(
@@ -1428,10 +1439,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnAutoLaunchSkipped(object? sender, EventArgs e)
     {
+        if (_disposed) return;
         _ = Application.Current.Dispatcher.BeginInvoke(
             DispatcherPriority.Normal,
             new Action(() =>
             {
+                if (_disposed) return;
                 var launch = _settings.Current.Launch;
 
                 // 用户其实早就把两个开关都勾上了（比如从旧版本带过来的设置），
@@ -1460,10 +1473,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable
 
     private void OnAudioReconnectCompleted(object? sender, EventArgs e)
     {
+        if (_disposed) return;
         _ = Application.Current.Dispatcher.BeginInvoke(
             DispatcherPriority.Normal,
             new Action(() =>
             {
+                if (_disposed) return;
                 IsAudioReconnectPending = false;
                 IsAudioMuted = _childSessionService.AudioMuted;
                 UpdateConnectionStatus();

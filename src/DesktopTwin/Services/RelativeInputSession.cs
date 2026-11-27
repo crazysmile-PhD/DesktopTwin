@@ -79,17 +79,14 @@ internal sealed class RelativeInputSession : IDisposable
         var launchTask = launch is null
             ? ChildSessionProcessLauncher.LaunchInputReceiverAsync(sessionId, path, arguments, budget.Token)
             : launch(path, arguments, budget.Token);
+        var handshake = AcceptPeerAsync(path, sessionId, budget.Token);
         try
         {
-            await _pipe.WaitForConnectionAsync(budget.Token).ConfigureAwait(false);
-            var hello = new byte[12];
-            await _pipe.ReadExactlyAsync(hello, budget.Token).ConfigureAwait(false);
-            ValidatePeer(path, sessionId);
-            using var reader = new BinaryReader(new MemoryStream(hello));
-            if (reader.ReadInt32() != RelativeInputProtocol.Version || reader.ReadInt32() != sessionId
-                || reader.ReadUInt32() != PeerProcessId()) throw new IOException("Input receiver handshake mismatch.");
-            // Keep an unarmed receiver alive while task/creation verification finishes.
-            // No foreground lease is issued by the controller until Ready becomes true.
+            // A failed launch cannot produce a handshake. Preserve its cause without waiting for the pipe deadline.
+            await Task.WhenAny(launchTask, handshake).ConfigureAwait(false);
+            if (launchTask.IsCompleted) await launchTask.ConfigureAwait(false);
+            await handshake.ConfigureAwait(false);
+            // No foreground lease is issued by the controller until creation verification finishes.
             _loop = RunAsync(sessionId);
             await launchTask.ConfigureAwait(false);
             budget.Token.ThrowIfCancellationRequested();
@@ -100,10 +97,23 @@ internal sealed class RelativeInputSession : IDisposable
         catch
         {
             Dispose();
+            try { await handshake.ConfigureAwait(false); }
+            catch (Exception error) { AppLog.Warn("输入接收端握手未完成。", error); }
             try { await launchTask.ConfigureAwait(false); }
             catch (Exception error) { AppLog.Warn("输入接收端启动未完成。", error); }
             throw;
         }
+    }
+
+    private async Task AcceptPeerAsync(string path, uint sessionId, CancellationToken cancellationToken)
+    {
+        await _pipe.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
+        var hello = new byte[12];
+        await _pipe.ReadExactlyAsync(hello, cancellationToken).ConfigureAwait(false);
+        ValidatePeer(path, sessionId);
+        using var reader = new BinaryReader(new MemoryStream(hello));
+        if (reader.ReadInt32() != RelativeInputProtocol.Version || reader.ReadInt32() != sessionId
+            || reader.ReadUInt32() != PeerProcessId()) throw new IOException("Input receiver handshake mismatch.");
     }
 
     private uint PeerProcessId()
@@ -153,14 +163,16 @@ internal sealed class RelativeInputSession : IDisposable
         try
         {
             var armed = false;
-            var exchangedAt = Environment.TickCount64 - 250;
+            await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false);
+            var exchangedAt = Environment.TickCount64;
             while (!_stop.IsCancellationRequested)
             {
-                var interval = armed ? 50 : 250;
-                var wait = (int)Math.Clamp(interval - (Environment.TickCount64 - exchangedAt), 0, interval);
+                const int interval = 50;
+                var wait = armed ? (int)Math.Clamp(interval - (Environment.TickCount64 - exchangedAt), 0, interval)
+                    : Timeout.Infinite;
                 await _signal.WaitAsync(wait, _stop.Token).ConfigureAwait(false);
                 var allowed = Environment.TickCount64 < Interlocked.Read(ref _armedUntil);
-                if (allowed != armed || Environment.TickCount64 - exchangedAt >= interval)
+                if (allowed != armed || (armed && Environment.TickCount64 - exchangedAt >= interval))
                 {
                     await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false);
                     armed = allowed;
