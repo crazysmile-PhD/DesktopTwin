@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DesktopTwin\DesktopTwin.csproj" />
+    <ProjectReference Include="..\DesktopTwin.NativeSmoke\DesktopTwin.NativeSmoke.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

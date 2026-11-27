@@ -161,5 +161,22 @@
       "DesktopTwin.Tests.SessionLogoffOperationTests.MissingSessionNeedsNoCompletionPolling",
       "DesktopTwin.Tests.SessionLogoffOperationTests.ReplacementSessionIsNotWaitedOn"
     ]
+  },
+  "WORK001": {
+    "description": "Program launch is independent of settings writes; idle sessions and disarmed input peers do no periodic work, active input expiry and identity checks remain enforced, startup failures preserve their cause, presentation disposal releases subscribers, and snapshots do not start system verification.",
+    "tests": [
+      "DesktopTwin.Tests.SessionLifecycleTests.SettingsWriteFailureDoesNotPreventExplicitProgramLaunch",
+      "DesktopTwin.Tests.SessionLifecycleTests.IdleAndConnectedSessionsDoNotPollAndDisconnectUpdatesImmediately",
+      "DesktopTwin.Tests.SessionLifecycleTests.SynchronousArgumentAndAccessFailuresDoNotRetry(accessDenied: True)",
+      "DesktopTwin.Tests.SessionLifecycleTests.SynchronousArgumentAndAccessFailuresDoNotRetry(accessDenied: False)",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.FailedLaunchIsReportedWithoutWaitingForHandshake(connectWithoutHello: True)",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.FailedLaunchIsReportedWithoutWaitingForHandshake(connectWithoutHello: False)",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.RealReceiverReportsItsSessionAndExitsWhenHostDisconnects",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.ReceiverStopsWhenTheHostLeaseExpiresEvenIfTheHostProcessIsAlive",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.ReceiverRejectsWrongParentAndWrongSessionBeforeAcceptingInput",
+      "DesktopTwin.Tests.PresentationLifecycleTests.DisposedViewModelIsReleasedWhileTheSessionServiceLives",
+      "DesktopTwin.Tests.PresentationLifecycleTests.HiddenUnconnectedFullscreenDoesNotScanForCredentials",
+      "DesktopTwin.Tests.EnvironmentCheckTests.ReadingTermsrvSnapshotDoesNotStartSystemVerification"
+    ]
   }
 }

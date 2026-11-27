@@ -45,6 +45,8 @@
 
 保留有界队列和相邻位移合并，按钮与键盘顺序不变。单一串行收发者复用编解码缓冲和超时来源，接收端一次写出完整状态；输入交换已提供活动与光标证据时不再附加心跳。[Moonlight 的输入实现](https://github.com/moonlight-stream/moonlight-common-c/blob/master/src/InputStream.c) 同样区分可合并移动与必须保序的状态变化。本项目仍保留现有逐笔确认，没有为微基准另建并行通道或批次协议。
 
+未授权并完成释放后，输入两端阻塞等新事件，不周期交换状态；接收端仅在授权期间运行单次看门狗。主程序没有会话或连接已稳定时不再每 500ms 查询 WTS/SCM，窗口隐藏或登录结束后停止全屏凭据观察。诊断打开/激活不自动启动 SFC，现有“重新检测”动作才请求完整性验证。目标程序启动不等待无关设置落盘；启动任务失败也不继续等待接收端握手逾时。这些边界由查询次数、管道状态及原始错误回归验证，不将其换算成固定节电比例。
+
 代理使用固定 SDK 编译器及 Framework 程序集，按各自源文件增量编译并启用确定性输出。[MSBuild 增量建置](https://learn.microsoft.com/en-us/visualstudio/msbuild/incremental-builds) 与 [Csc 的 Deterministic 选项](https://learn.microsoft.com/en-us/visualstudio/msbuild/csc-task) 是此处的依据。CI 自动验证无修改时不重编代理、强制重建时相同输入仍生成相同字节，不使用硬件相关的毫秒数作为门禁。
 
 这些措施减少喚醒、I/O、配置与编译工作，不等于已测得整机省电比例。输入微基准须记录实际加载的 DLL SHA-256、运行时、单/跨进程、样本数与原始结果；不能换算成真实游戏端到端延迟或 FPS。

@@ -39,16 +39,19 @@ public sealed class DesktopSessionHostTests
         var visibility = 0;
         var logins = 0;
         var sizes = 0;
+        var connections = 0;
         var error = new ChildSessionConnectionFailedEventArgs("failure", 42);
         ChildSessionConnectionFailedEventArgs? received = null;
         host.VisibilityChanged += (_, _) => visibility++;
         host.LoginCompleted += (_, _) => logins++;
+        host.ConnectionStateChanged += (_, _) => connections++;
         host.DesktopSizeChanged += (_, _) => sizes++;
         host.ConnectionFailed += (_, value) => received = value;
         host.GetOrCreate();
         view.RaiseEvents(error);
         Assert.Equal(1, visibility);
         Assert.Equal(1, logins);
+        Assert.Equal(1, connections);
         Assert.Equal(1, sizes);
         Assert.Same(error, received);
         received = null;
@@ -60,6 +63,7 @@ public sealed class DesktopSessionHostTests
         Assert.Equal(1, logins);
         Assert.Null(received);
         Assert.Equal(1, sizes);
+        Assert.Equal(1, connections);
     }
 
     [Fact]
@@ -139,6 +143,7 @@ public sealed class DesktopSessionHostTests
         public ChildSessionConnectionFailedEventArgs? LastConnectionDiagnostic => null;
         public event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed;
         public event EventHandler? LoginCompleted;
+        public event EventHandler? ConnectionStateChanged;
         public void SetCredentialProvider(Func<(string UserName, string Domain, string Password)?>? provider) => CredentialProvider = provider;
         public void SetSmartSizing(bool enabled)
         {
@@ -154,6 +159,7 @@ public sealed class DesktopSessionHostTests
         public void SendTaskViewShortcut() { }
         internal void RaiseEvents(ChildSessionConnectionFailedEventArgs error)
         {
+            ConnectionStateChanged?.Invoke(this, EventArgs.Empty);
             LoginCompleted?.Invoke(this, EventArgs.Empty);
             ConnectionFailed?.Invoke(this, error);
         }

@@ -156,6 +156,7 @@ public partial class MainWindow : FluentWindow
         _displayConfirmationTimer.Tick += OnDisplayConfirmationTick;
         DesktopArea.SizeChanged += OnDesktopAreaSizeChanged;
         RdpHost.LoginCompleted += OnDisplayLoginCompleted;
+        RdpHost.ConnectionStateChanged += OnRdpConnectionStateChanged;
         RelativeInput = new RelativeInputController(this, settings, childSessionService);
 
         // Topmost 由 XAML 里的 OneWay 绑定驱动（MainWindow.xaml:20），
@@ -236,6 +237,7 @@ public partial class MainWindow : FluentWindow
         _displayConfirmationTimer?.Stop();
         DesktopArea.SizeChanged -= OnDesktopAreaSizeChanged;
         RdpHost.LoginCompleted -= OnDisplayLoginCompleted;
+        RdpHost.ConnectionStateChanged -= OnRdpConnectionStateChanged;
         RelativeInput.Dispose();
 
         RdpFormsHost.Child = null;
@@ -286,6 +288,7 @@ public partial class MainWindow : FluentWindow
 
     private void OnDisplayLoginCompleted(object? sender, EventArgs e)
     {
+        UpdateCredentialDialogWatch();
         _displayResizeFailureNotified = false;
         QueueDisplayResize();
     }
@@ -339,6 +342,9 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void OnWindowStateChanged(object? sender, EventArgs e)
     {
+        UpdateCredentialDialogWatch();
+        if (WindowState == WindowState.Minimized) StopCursorWatch();
+        else if (_isFullscreen && IsVisible) StartCursorWatch();
         if (WindowState == WindowState.Minimized)
         {
             _wasMinimized = true;
@@ -404,6 +410,7 @@ public partial class MainWindow : FluentWindow
         // 置顶窗口会盖住「Windows 安全中心」凭据框这类非置顶窗口，
         // 即使它抢到了前台焦点也露不出来。放下置顶后，非置顶的前台窗口就能显示。
         // 用 SetCurrentValue 而不是直接赋值，避免清掉 XAML 里的 OneWay 绑定。
+        StopCursorWatch();
         SetCurrentValue(TopmostProperty, false);
 
         if (!_barPinned)
@@ -429,6 +436,7 @@ public partial class MainWindow : FluentWindow
         }
 
         SetCurrentValue(TopmostProperty, true);
+        StartCursorWatch();
 
         // 凭据框场景里，置顶是用 Win32 直接放下的（当时 UI 线程被模态弹窗卡住，
         // WPF 的 Topmost 属性没变过，SetCurrentValue(true) 是 no-op）。
@@ -452,6 +460,7 @@ public partial class MainWindow : FluentWindow
 
     private void OnWindowVisibilityChanged(object? sender, DependencyPropertyChangedEventArgs e)
     {
+        UpdateCredentialDialogWatch();
         if (IsVisible)
         {
             // 隐藏时把轮询停了，回来要接上：全屏下工具栏只能靠光标轮询唤出。
@@ -557,7 +566,7 @@ public partial class MainWindow : FluentWindow
         UpdatePinButtons();
         ShowFullscreenBar();
         StartCursorWatch();
-        StartCredentialDialogWatch();
+        UpdateCredentialDialogWatch();
     }
 
     /// <summary>
@@ -982,6 +991,7 @@ public partial class MainWindow : FluentWindow
     /// </summary>
     private void StartCursorWatch()
     {
+        if (!IsVisible || !IsActive || WindowState == WindowState.Minimized) return;
         _cursorWatchTimer ??= new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromMilliseconds(180)
@@ -997,12 +1007,25 @@ public partial class MainWindow : FluentWindow
         _cursorWatchTimer?.Stop();
     }
 
+    private void OnRdpConnectionStateChanged(object? sender, EventArgs e) => UpdateCredentialDialogWatch();
+
+    private void UpdateCredentialDialogWatch()
+    {
+        if (_isFullscreen && IsVisible && WindowState != WindowState.Minimized
+            && !RdpHost.LoginComplete && RdpHost.ConnectedState == 2)
+            StartCredentialDialogWatch();
+        else StopCredentialDialogWatch();
+    }
+
+    /// <summary>当前窗口是否正在观察登录凭据框。</summary>
+    internal bool CredentialDialogWatchEnabled
+    {
+        get { lock (_credentialDialogWatchGate) return _credentialDialogWatchEnabled; }
+    }
+
     /// <summary>
-    /// 全屏期间启动后台轮询，主动发现「Windows 安全中心」凭据框。
-    ///
-    /// 不能用 DispatcherTimer：凭据框是模态的，UI 线程会卡在它的消息循环里，
-    /// DispatcherTimer 跟着停摆（这正是「启动过程中工具栏唤不出」的原因）。
-    /// System.Threading.Timer 跑在线程池上，不依赖 UI 线程泵消息。
+    /// 全屏登录期间主动发现「Windows 安全中心」凭据框。
+    /// 凭据框的模态循环可能阻塞 DispatcherTimer，因此由线程池观察。
     /// </summary>
     private void StartCredentialDialogWatch()
     {
@@ -1010,6 +1033,7 @@ public partial class MainWindow : FluentWindow
 
         lock (_credentialDialogWatchGate)
         {
+            if (_credentialDialogWatchEnabled) return;
             _revealedCredentialDialog = IntPtr.Zero;
             _topmostSuppressedForCredential = false;
             _credentialDialogWatchEnabled = true;

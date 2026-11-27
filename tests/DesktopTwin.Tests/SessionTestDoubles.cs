@@ -105,6 +105,7 @@ internal sealed class FakeRdpClient : IRdpSessionClient
     public ChildSessionConnectionFailedEventArgs? LastConnectionDiagnostic { get; private set; }
     public event EventHandler<ChildSessionConnectionFailedEventArgs>? ConnectionFailed;
     public event EventHandler? LoginCompleted;
+    public event EventHandler? ConnectionStateChanged;
     public void SetCredentialProvider(Func<(string UserName, string Domain, string Password)?>? provider) => CredentialProvider = provider;
     public void SetSmartSizing(bool enabled) { }
     public void SetSendSystemShortcutsToRemote(bool enabled) => RemoteShortcuts = enabled;
@@ -115,17 +116,23 @@ internal sealed class FakeRdpClient : IRdpSessionClient
         Connections.Add(size);
         if (ConnectError is not null) throw ConnectError;
         ConnectedState = 2;
+        ConnectionStateChanged?.Invoke(this, EventArgs.Empty);
         OnConnect?.Invoke();
     }
     public void DisconnectSession()
     {
         DisconnectCalls++;
         if (DisconnectError is not null) throw DisconnectError;
-        if (DisconnectImmediately) ConnectedState = 0;
+        if (DisconnectImmediately) ChangeConnectionState(0);
     }
     public void SendShowDesktopShortcut() { }
     public void SendTaskViewShortcut() { }
     internal void Login() { ConnectedState = 1; LoginCompleted?.Invoke(this, EventArgs.Empty); }
+    internal void ChangeConnectionState(int state)
+    {
+        ConnectedState = state;
+        ConnectionStateChanged?.Invoke(this, EventArgs.Empty);
+    }
     internal void Fail(int code = 5)
     {
         LastConnectionDiagnostic = new ChildSessionConnectionFailedEventArgs("failed", code);
