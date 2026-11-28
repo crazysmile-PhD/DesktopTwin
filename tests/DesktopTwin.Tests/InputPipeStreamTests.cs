@@ -24,6 +24,7 @@ public sealed class InputPipeStreamTests
         {
             try
             {
+                Assert.True(InputPipeStream.IsIoWorker);
                 var count = read.Result;
                 var inline = new StackTrace().GetFrames().Any(frame => frame.GetMethod()?.DeclaringType == typeof(InputPipeStream));
                 io.Dispose();
@@ -232,6 +233,7 @@ public sealed class InputPipeStreamTests
         using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await Task.WhenAll(server.WaitForConnectionAsync(timeout.Token), client.ConnectAsync(timeout.Token));
-        await body(server, client);
+        // Production's transport hands off short-lived callers before issuing event-based native IO.
+        await Task.Run(() => body(server, client));
     }
 }

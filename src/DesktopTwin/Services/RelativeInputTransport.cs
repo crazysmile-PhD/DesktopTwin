@@ -30,6 +30,8 @@ internal sealed class RelativeInputTransport : IDisposable
     internal async ValueTask<RelativeInputStatus> ExchangeAsync(InputPacket packet, uint sessionId)
     {
         var io = _io ??= new InputPipeStream((PipeStream)_stream, _requestBytes, _statusBytes, _deadline.Token);
+        if (io is InputPipeStream && !InputPipeStream.IsIoWorker)
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
         _deadline.Begin();
         try
         {

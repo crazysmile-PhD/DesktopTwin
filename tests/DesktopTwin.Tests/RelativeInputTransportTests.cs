@@ -39,6 +39,29 @@ public sealed class RelativeInputTransportTests
         await replies;
     });
 
+    [Fact]
+    public Task ExchangesOutliveAShortLivedCallerThread() => WithPipeAsync(async (server, peer) =>
+    {
+        using var transport = new RelativeInputTransport(server, default);
+        for (var round = 0; round < 4; round++)
+        {
+            var request = peer.ReadExactlyAsync(new byte[RelativeInputProtocol.PacketBytes]).AsTask();
+            Task<RelativeInputStatus>? exchange = null;
+            var caller = new Thread(() => exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17).AsTask());
+            caller.Start();
+            Assert.True(caller.Join(TimeSpan.FromSeconds(5)));
+            var pending = Assert.IsAssignableFrom<Task<RelativeInputStatus>>(exchange);
+            // The caller exits before its pending reply arrives; no timeout or stop requested cancellation.
+            await Task.WhenAny(request, pending);
+            if (pending.IsCompleted) await pending; // Surface an aborted write without waiting for an impossible request.
+            await request;
+            var reply = Status(17, moves: round);
+            await peer.WriteAsync(reply.AsMemory(0, 7));
+            await peer.WriteAsync(reply.AsMemory(7));
+            Assert.Equal(round, (await pending).InjectedMoves);
+        }
+    });
+
     [Theory]
     [InlineData(18, 0)]
     [InlineData(17, 1)]

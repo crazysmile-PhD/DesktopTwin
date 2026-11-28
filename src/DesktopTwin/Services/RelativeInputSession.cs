@@ -172,7 +172,6 @@ internal sealed class RelativeInputSession : IDisposable
     {
         try
         {
-            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
             var pump = new RelativeInputPump(_transport, _queue, _signal,
                 () => Interlocked.Read(ref _armedUntil), TakeStatusRequest, PublishStatus);
             await pump.RunAsync(sessionId, _stop.Token).ConfigureAwait(false);
@@ -181,7 +180,14 @@ internal sealed class RelativeInputSession : IDisposable
         {
             if (!_stop.IsCancellationRequested) { Failure = error.Message; AppLog.Warn("相对输入通道已断开。", error); }
         }
-        finally { Volatile.Write(ref _ready, 0); _pipe.Dispose(); }
+        finally
+        {
+            Volatile.Write(ref _ready, 0);
+            // Release the adapter's borrowed handle before closing the pipe, including loop failures
+            // that precede an explicit session disposal. Otherwise the peer cannot observe EOF.
+            try { _transport.Dispose(); }
+            finally { _pipe.Dispose(); }
+        }
     }
     private void PublishStatus(RelativeInputStatus status)
     {

@@ -283,9 +283,12 @@
     ]
   },
   "INPUT009": {
-    "description": "One borrowed overlapped pipe and native wait reuse buffers and completion state; synchronous IO returns directly and suspended IO resumes on its completion worker, single consumption prevents storage reuse, cancellation/disposal drain IO, and the existing deadline, lease and held-input release contracts remain enforced.",
+    "description": "One borrowed overlapped pipe and native wait reuse buffers and completion state; synchronous IO returns directly and suspended IO resumes on its completion worker, arbitrary caller threads hand off before issuing event-based IO, single consumption prevents storage reuse, cancellation/disposal drain IO, and the existing deadline, lease and held-input release contracts remain enforced.",
     "tests": [
       "DesktopTwin.Tests.InputPipeStreamTests.PendingReadResumesOnItsCompletionWorkerAndCanDisposeInline",
+      "DesktopTwin.Tests.RelativeInputTransportTests.ExchangesOutliveAShortLivedCallerThread",
+      "DesktopTwin.Tests.RelativeInputSessionTests.ExchangeFailureClosesThePeerBeforeSessionDisposal(missingReply: False)",
+      "DesktopTwin.Tests.RelativeInputSessionTests.ExchangeFailureClosesThePeerBeforeSessionDisposal(missingReply: True)",
       "DesktopTwin.Tests.InputPipeStreamTests.FragmentedStatusKeepsOffsetsAndEofIsNotReportedAsAFullFrame",
       "DesktopTwin.Tests.InputPipeStreamTests.PendingResultsMustBeReadyAndConsumedBeforeStorageIsReused",
       "DesktopTwin.Tests.InputPipeStreamTests.PendingWritesObserveCancellationAndPeerFailure(cancel: False)",

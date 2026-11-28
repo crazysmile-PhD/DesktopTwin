@@ -10,7 +10,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace DesktopTwin.Services;
 
-/// <summary>One serial native pipe operation completes its ValueTask on the IO worker without another enqueue.</summary>
+/// <summary>Serial native pipe IO on a pool worker; its ValueTask resumes there without another enqueue.</summary>
 internal sealed class InputPipeStream : Stream, IValueTaskSource<int>, IValueTaskSource
 {
     private readonly object _gate = new();
@@ -19,6 +19,7 @@ internal sealed class InputPipeStream : Stream, IValueTaskSource<int>, IValueTas
     private readonly CancellationToken _stop;
     private readonly SafePipeHandle _pipeHandle;
     private static readonly NativeWaitCallback Callback = OnCompleted;
+    [ThreadStatic] private static bool _completingIo;
     private CancellationTokenRegistration _cancellation;
     private ManualResetValueTaskSourceCore<int> _source; // Continuations may run on the native IO worker.
     private GCHandle _requestPin, _statusPin, _context;
@@ -59,6 +60,9 @@ internal sealed class InputPipeStream : Stream, IValueTaskSource<int>, IValueTas
     }
 
     ~InputPipeStream() { Dispose(false); }
+    // Event-based IO is canceled when its issuing thread exits. The owner moves arbitrary callers
+    // to the managed pool; native completion workers can continue the same serial chain directly.
+    internal static bool IsIoWorker => _completingIo || Thread.CurrentThread.IsThreadPoolThread;
     internal bool IsIoPending { get { lock (_gate) return _inOperation; } }
 
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -186,7 +190,10 @@ internal sealed class InputPipeStream : Stream, IValueTaskSource<int>, IValueTas
         if (GCHandle.FromIntPtr(context).Target is not InputPipeStream owner) return;
         // An inline continuation may dispose the wait itself; context is no longer used below.
         DisassociateCurrentThreadFromCallback(instance);
-        owner.CompletePending(true);
+        var wasCompleting = _completingIo;
+        _completingIo = true;
+        try { owner.CompletePending(true); }
+        finally { _completingIo = wasCompleting; }
     }
 
     private int Consume(short token)
