@@ -240,7 +240,7 @@
     ]
   },
   "INPUT007": {
-    "description": "Queued input replies satisfy pre-write status requests without a duplicate heartbeat; only empty queue transitions notify the reader, stale wakes are cleared before durable state is inspected, and unchanged deadlines preserve grants, revocation, expiry and shutdown.",
+    "description": "Queued input replies satisfy pre-write status requests without a duplicate heartbeat; only empty queue transitions notify the reader, stale wakes are cleared before durable state is inspected, authorization IO leaves queued input invalidatable across revocation and renewal, and unchanged deadlines preserve expiry and shutdown.",
     "tests": [
       "DesktopTwin.Tests.RelativeInputPumpTests.QueuedRepliesReplaceStatusHeartbeatsAndKeepTransitionOrder",
       "DesktopTwin.Tests.RelativeInputPumpTests.QueuedInputAtTheHeartbeatDeadlineProvidesTheRequestedStatus",
@@ -248,6 +248,7 @@
       "DesktopTwin.Tests.RelativeInputPumpTests.IdleNotificationsDoNotQueryAndPassiveRequestsDoNotAuthorize",
       "DesktopTwin.Tests.RelativeInputPumpTests.ExpiredAuthorizationDropsPendingTransitionsAndRevokesOnce",
       "DesktopTwin.Tests.RelativeInputPumpTests.RevocationDuringAGrantReplyPreventsPendingInput",
+      "DesktopTwin.Tests.RelativeInputPumpTests.RevocationAndRenewalDuringAGrantReplyCannotResurrectClearedInput",
       "DesktopTwin.Tests.RelativeInputPumpTests.RequestsArrivingDuringTheLastInputStillReceiveANewReply",
       "DesktopTwin.Tests.RelativeInputPumpTests.CancellationDuringStateInspectionDoesNotNeedAnotherWake",
       "DesktopTwin.Tests.RelativeInputPumpTests.AGrantBecomingValidAfterTheSnapshotStillPrecedesInput",

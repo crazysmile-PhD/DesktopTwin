@@ -23,49 +23,49 @@ internal sealed class RelativeInputPump(RelativeInputTransport transport, InputP
             // Every producer publishes durable state before Set. Clear first, then recheck all state;
             // a racing producer either becomes visible below or leaves a new token for WaitAsync.
             signal.ClearPending();
-            var hasPacket = queue.TryTake(out var packet);
             var allowed = _now() < leaseUntil();
             var requested = takeStatusRequest();
             var exchanged = false;
-            if (allowed != armed || ((!hasPacket || !allowed)
-                && (requested || (armed && _now() - exchangedAt >= HeartbeatMilliseconds))))
+            if (allowed != armed)
             {
                 publish(await transport.ExchangeAsync(new(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false));
                 armed = allowed;
                 exchangedAt = _now();
                 exchanged = true;
             }
-            while (hasPacket && !stop.IsCancellationRequested)
+            // Keep transitions in the queue throughout authorization IO, so a revocation can
+            // invalidate them even if a new grant arrives before the old reply completes.
+            if (!armed)
             {
-                if (_now() >= leaseUntil())
+                if (_now() < leaseUntil()) continue;
+                queue.Clear();
+            }
+            else
+            {
+                while (!stop.IsCancellationRequested && queue.TryTake(out var packet))
                 {
-                    queue.Clear();
-                    if (armed)
+                    if (_now() >= leaseUntil())
                     {
+                        queue.Clear();
                         publish(await transport.ExchangeAsync(new(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false));
                         armed = false;
                         exchangedAt = _now();
                         exchanged = true;
+                        break;
                     }
-                    break;
-                }
-                // Authorization can change while a previous exchange is in flight. Grant first,
-                // then recheck the short lease before sending this still-pending transition.
-                if (!armed)
-                {
-                    publish(await transport.ExchangeAsync(new(InputOperation.Heartbeat, 1), sessionId).ConfigureAwait(false));
-                    armed = true;
+                    // A request published before this write is fulfilled by this packet's fresh reply.
+                    // Requests arriving during the exchange remain pending for the next turn.
+                    takeStatusRequest();
+                    publish(await transport.ExchangeAsync(packet, sessionId).ConfigureAwait(false));
                     exchangedAt = _now();
                     exchanged = true;
-                    continue;
                 }
-                // A request published before this write is fulfilled by this packet's fresh reply.
-                // Requests arriving during the exchange remain pending for the next turn.
-                takeStatusRequest();
-                publish(await transport.ExchangeAsync(packet, sessionId).ConfigureAwait(false));
+            }
+            if (!exchanged && (requested || (armed && _now() - exchangedAt >= HeartbeatMilliseconds)))
+            {
+                publish(await transport.ExchangeAsync(new(InputOperation.Heartbeat, armed ? 1 : 0), sessionId).ConfigureAwait(false));
                 exchangedAt = _now();
                 exchanged = true;
-                hasPacket = queue.TryTake(out packet);
             }
             if (exchanged) continue;
             if (stop.IsCancellationRequested) break;

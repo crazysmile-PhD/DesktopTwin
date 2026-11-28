@@ -106,6 +106,30 @@ public sealed class RelativeInputPumpTests
     }
 
     [Fact]
+    public async Task RevocationAndRenewalDuringAGrantReplyCannotResurrectClearedInput()
+    {
+        await using var rig = new Rig { Until = 250 };
+        rig.Enqueue(new(InputOperation.Key, 1, 1));
+        rig.Enqueue(new(InputOperation.Key, 1, 0));
+        rig.Stream.SuspendGrant = true;
+        _ = rig.Run();
+        Assert.True(rig.Stream.HasPendingReply);
+        rig.Until = 0;
+        rig.Queue.Clear(); // SetForegroundLease(false) invalidates both queued transitions.
+        rig.Signal.Set();
+        rig.Until = 500;
+        rig.Signal.Set();
+        rig.Enqueue(new(InputOperation.ReleasePointer)); // New input after renewal remains valid.
+        rig.Request();
+        rig.Stream.SuspendGrant = false;
+        rig.Stream.CompleteReply();
+        await rig.WaitPublishedAsync(3);
+        Assert.Equal(new[] { (InputOperation.Heartbeat, 0, 0), (InputOperation.Heartbeat, 1, 0),
+            (InputOperation.ReleasePointer, 0, 0) }, rig.Packets());
+        Assert.False(rig.Queue.TryTake(out _));
+    }
+
+    [Fact]
     public async Task RequestsArrivingDuringTheLastInputStillReceiveANewReply()
     {
         await using var rig = new Rig { Until = 10000 };
