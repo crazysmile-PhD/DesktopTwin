@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using DesktopTwin.Input;
@@ -21,8 +22,9 @@ internal sealed class RelativeInputTransport : IDisposable
         _deadline = CancellationTokenSource.CreateLinkedTokenSource(stop);
     }
 
-    /// <summary>A timeout ends the transport; its canceled deadline is never renewed for another attempt.</summary>
-    internal async Task<RelativeInputStatus> ExchangeAsync(InputPacket packet, uint sessionId)
+    /// <summary>The serialized owner awaits each result once; a timeout permanently ends the transport.</summary>
+    [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
+    internal async ValueTask<RelativeInputStatus> ExchangeAsync(InputPacket packet, uint sessionId)
     {
         _deadline.CancelAfter(TimeSpan.FromSeconds(1));
         try

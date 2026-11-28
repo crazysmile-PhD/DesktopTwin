@@ -17,7 +17,7 @@ internal sealed class RelativeInputSession : IDisposable
     private readonly NamedPipeServerStream _pipe;
     private readonly CancellationTokenSource _stop = new();
     private readonly InputPacketQueue _queue = new();
-    private readonly SemaphoreSlim _signal = new(0, 1);
+    private readonly InputWakeSignal _signal = new();
     private readonly RelativeInputTransport _transport;
     private Task _loop = Task.CompletedTask;
     private readonly TaskCompletionSource _startup = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -30,6 +30,8 @@ internal sealed class RelativeInputSession : IDisposable
     internal RelativeInputStatus? Status { get { lock (_statusGate) return _status; } }
     private int _ready;
     internal bool Ready => Volatile.Read(ref _ready) != 0;
+    /// <summary>Completes after the single exchange loop stops using its pipe and signal.</summary>
+    internal Task Completion => _loop;
     internal string? Failure { get; private set; }
     internal string PipeName { get; } = "DesktopTwin.Input." + Guid.NewGuid().ToString("N");
 
@@ -151,8 +153,7 @@ internal sealed class RelativeInputSession : IDisposable
     internal void RequestStatus()
     {
         if (!Ready || Volatile.Read(ref _disposed) != 0) return;
-        Interlocked.Exchange(ref _statusRequested, 1);
-        Signal();
+        if (Interlocked.Exchange(ref _statusRequested, 1) == 0) Signal();
     }
     internal bool TrySend(InputPacket packet)
     {
@@ -162,12 +163,7 @@ internal sealed class RelativeInputSession : IDisposable
         return true;
     }
 
-    private void Signal()
-    {
-        try { _signal.Release(); }
-        catch (SemaphoreFullException) { } // One wake-up drains the already bounded queue.
-        catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0) { }
-    }
+    private void Signal() => _signal.Set();
 
     private async Task RunAsync(uint sessionId)
     {
@@ -181,7 +177,9 @@ internal sealed class RelativeInputSession : IDisposable
                 const int interval = 50;
                 var wait = armed ? (int)Math.Clamp(interval - (Environment.TickCount64 - exchangedAt), 0, interval)
                     : Timeout.Infinite;
-                await _signal.WaitAsync(wait, _stop.Token).ConfigureAwait(false);
+                // Dispose wakes this wait explicitly; one cancellation registration already owns IO.
+                await _signal.WaitAsync(wait).ConfigureAwait(false);
+                if (_stop.IsCancellationRequested) break;
                 var allowed = Environment.TickCount64 < Interlocked.Read(ref _armedUntil);
                 var statusRequested = Interlocked.Exchange(ref _statusRequested, 0) != 0;
                 if (allowed != armed || statusRequested || (armed && Environment.TickCount64 - exchangedAt >= interval))
@@ -224,6 +222,7 @@ internal sealed class RelativeInputSession : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Volatile.Write(ref _ready, 0);
         _stop.Cancel();
+        Signal();
         _pipe.Dispose();
         if (Volatile.Read(ref _started) == 0) _startup.TrySetResult();
         _ = _startup.Task.ContinueWith(async _ =>

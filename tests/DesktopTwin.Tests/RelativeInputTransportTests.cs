@@ -45,7 +45,7 @@ public sealed class RelativeInputTransportTests
     public Task WrongSessionOrInvalidStatusFailsTheExchange(int session, int error) => WithPipeAsync(async (server, peer) =>
     {
         using var transport = new RelativeInputTransport(server, default);
-        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17);
+        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17).AsTask();
         await peer.ReadExactlyAsync(new byte[RelativeInputProtocol.PacketBytes]);
         await peer.WriteAsync(Status(session, error: error));
         var failure = await Record.ExceptionAsync(() => exchange);
@@ -57,7 +57,7 @@ public sealed class RelativeInputTransportTests
     public Task PartialStatusAndPeerDisconnectCannotBeReportedAsSuccess() => WithPipeAsync(async (server, peer) =>
     {
         using var transport = new RelativeInputTransport(server, default);
-        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17);
+        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17).AsTask();
         await peer.ReadExactlyAsync(new byte[RelativeInputProtocol.PacketBytes]);
         await peer.WriteAsync(Status(17).AsMemory(0, 5));
         peer.Dispose();
@@ -68,11 +68,11 @@ public sealed class RelativeInputTransportTests
     public Task MissingReplyTimesOutAndCannotRenewACanceledTransport() => WithPipeAsync(async (server, peer) =>
     {
         using var transport = new RelativeInputTransport(server, default);
-        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17);
+        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17).AsTask();
         await peer.ReadExactlyAsync(new byte[RelativeInputProtocol.PacketBytes]);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => exchange);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            transport.ExchangeAsync(new(InputOperation.Heartbeat), 17));
+            transport.ExchangeAsync(new(InputOperation.Heartbeat), 17).AsTask());
     });
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class RelativeInputTransportTests
     {
         using var stop = new CancellationTokenSource();
         var transport = new RelativeInputTransport(server, stop.Token);
-        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17);
+        var exchange = transport.ExchangeAsync(new(InputOperation.Heartbeat), 17).AsTask();
         await peer.ReadExactlyAsync(new byte[RelativeInputProtocol.PacketBytes]);
         stop.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => exchange);
