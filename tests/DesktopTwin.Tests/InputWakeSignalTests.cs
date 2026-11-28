@@ -6,6 +6,19 @@ namespace DesktopTwin.Tests;
 public sealed class InputWakeSignalTests
 {
     [Fact]
+    public void ClearingAnOldNotificationPreservesTheNextRacingSignal()
+    {
+        using var signal = new InputWakeSignal();
+        signal.Set();
+        Assert.True(signal.ClearPending());
+        Assert.False(signal.ClearPending());
+        var pending = signal.WaitAsync(Timeout.Infinite);
+        Assert.False(pending.IsCompleted);
+        signal.Set();
+        Assert.Equal(0, Completed(pending));
+    }
+
+    [Fact]
     public void BurstsCoalesceAndNewSignalsAndDisposalStillCompleteAPendingWait()
     {
         using var signal = new InputWakeSignal();

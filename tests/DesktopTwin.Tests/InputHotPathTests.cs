@@ -6,6 +6,26 @@ namespace DesktopTwin.Tests;
 public sealed class InputHotPathTests
 {
     [Fact]
+    public void OnlyAnEmptyQueueTransitionRequiresAWake()
+    {
+        var queue = new InputPacketQueue();
+        Assert.True(queue.TryAdd(new(InputOperation.Move, 1, 0), out var wake));
+        Assert.True(wake);
+        Assert.True(queue.TryAdd(new(InputOperation.Move, 2, 0), out wake));
+        Assert.False(wake);
+        Assert.True(queue.TryAdd(new(InputOperation.Key, 1, 1), out wake));
+        Assert.False(wake);
+        Assert.True(queue.TryTake(out var move));
+        Assert.Equal(3, move.X);
+        Assert.True(queue.TryTake(out _));
+        Assert.True(queue.TryAdd(new(InputOperation.Key, 1, 0), out wake));
+        Assert.True(wake);
+        queue.Clear();
+        Assert.True(queue.TryAdd(new(InputOperation.ReleasePointer), out wake));
+        Assert.True(wake);
+    }
+
+    [Fact]
     public void RingWraparoundPreservesTransitionsAndCoalescesOnlyItsLastMovement()
     {
         var queue = new InputPacketQueue();

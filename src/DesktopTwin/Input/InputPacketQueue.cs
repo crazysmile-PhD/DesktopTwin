@@ -10,10 +10,14 @@ internal sealed class InputPacketQueue
     private readonly InputPacket[] _pending = new InputPacket[Capacity];
     private int _head;
     private int _count;
-    internal bool TryAdd(InputPacket packet)
+    internal bool TryAdd(InputPacket packet) => TryAdd(packet, out _);
+
+    /// <summary>Only the empty-to-nonempty transition needs to wake the serialized reader.</summary>
+    internal bool TryAdd(InputPacket packet, out bool requiresWake)
     {
         lock (_gate)
         {
+            requiresWake = false;
             var last = (_head + _count - 1 + Capacity) % Capacity;
             if (packet.Operation == InputOperation.Move && _count != 0 && _pending[last].Operation == InputOperation.Move)
             {
@@ -24,6 +28,7 @@ internal sealed class InputPacketQueue
                 return true;
             }
             if (_count == Capacity) return false;
+            requiresWake = _count == 0;
             _pending[(_head + _count) % Capacity] = packet;
             _count++;
             return true;

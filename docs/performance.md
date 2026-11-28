@@ -53,6 +53,10 @@
 
 这些措施减少喚醒、I/O、配置与编译工作，不等于已测得整机省电比例。输入微基准须记录实际加载的 DLL SHA-256、运行时、单/跨进程、样本数与原始结果；不能换算成真实游戏端到端延迟或 FPS。
 
+CPU 比较使用引用实际生产 DLL 的独立宿主和未包装的 Framework 接收端，预热后分别测无请求空闲、250ms 被动发现、32ms 续租的活动心跳，以及每批四个无持有状态的释放控制包和一个状态请求。按同一驱动器重放，记录两端 PID、SHA-256、实际提交／回复数量、采样时长及所有轮次。宿主包含模拟驱动器的成本，接收端单独计数；这不包含 WPF／RDP／游戏，也不调用 SendInput。
+
+用 [GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes) 分开记录内核／用户 CPU 时间，单核百分比为 CPU 时间除以采样墙钟时间；同时记录 [QueryProcessCycleTime](https://learn.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryprocesscycletime) 的进程周期差，不能把周期直接换算为时间或功耗。低占用下 CPU 时间可能受系统计数量化影响，读数为 0 不表示进程完全没有工作；须结合周期、帧数和轮间变化判断。首次序列化与日志格式化放在所有采样窗口之后，防止其 JIT 工作污染后续样本。CPU 数字不作为 CI 的机器相关阈值，回归门禁检查确定的交换顺序、唤醒边界和租约行为。
+
 输入热路径先删除重复校验、逐字段读写和会话交换的额外异步包装，再用固定环形队列、只读值状态及接收端自有 INPUT 数组减少分配。固定请求/状态帧及逐笔确认继续沿用；没有增加采样任务或回复触发的 UI 调度。
 
 分配回归在预热后执行 10,000 次，使用 `GC.GetAllocatedBytesForCurrentThread`，将初始化与断言放在测量区外。它们要求队列入出、固定帧编解码、状态值解码、原生输入准备及状态编码的测量区间为零托管分配。原生准备测试编译实际接收端源码，检查复用数组和混合输入的 union 清零，但不调用 SendInput；真实 Framework 接收端另以状态/心跳验证帧格式、空闲、撤权和断线。此结果不包含异步 I/O、任务、异常或 SendInput 本身的所有开销。

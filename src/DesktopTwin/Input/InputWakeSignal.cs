@@ -23,6 +23,9 @@ internal sealed class InputWakeSignal : IDisposable
 
     internal void Set() => _wake.Writer.TryWrite(0);
 
+    /// <summary>The single reader clears one old token before rechecking durable queue, lease and request state.</summary>
+    internal bool ClearPending() => _wake.Reader.TryRead(out _);
+
     /// <summary>The single owner consumes each result once; its shutdown must signal the pending read.</summary>
     internal ValueTask<byte> WaitAsync(int milliseconds)
     {

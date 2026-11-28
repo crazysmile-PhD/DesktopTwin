@@ -239,6 +239,26 @@
       "DesktopTwin.Tests.RelativeInputReceiverTests.ReceiverStopsWhenTheHostLeaseExpiresEvenIfTheHostProcessIsAlive"
     ]
   },
+  "INPUT007": {
+    "description": "Queued input replies satisfy pre-write status requests without a duplicate heartbeat; only empty queue transitions notify the reader, stale wakes are cleared before durable state is inspected, and unchanged deadlines preserve grants, revocation, expiry and shutdown.",
+    "tests": [
+      "DesktopTwin.Tests.RelativeInputPumpTests.QueuedRepliesReplaceStatusHeartbeatsAndKeepTransitionOrder",
+      "DesktopTwin.Tests.RelativeInputPumpTests.QueuedInputAtTheHeartbeatDeadlineProvidesTheRequestedStatus",
+      "DesktopTwin.Tests.RelativeInputPumpTests.NewInputKeepsTheHeartbeatDeadlineFresh",
+      "DesktopTwin.Tests.RelativeInputPumpTests.IdleNotificationsDoNotQueryAndPassiveRequestsDoNotAuthorize",
+      "DesktopTwin.Tests.RelativeInputPumpTests.ExpiredAuthorizationDropsPendingTransitionsAndRevokesOnce",
+      "DesktopTwin.Tests.RelativeInputPumpTests.RevocationDuringAGrantReplyPreventsPendingInput",
+      "DesktopTwin.Tests.RelativeInputPumpTests.RequestsArrivingDuringTheLastInputStillReceiveANewReply",
+      "DesktopTwin.Tests.RelativeInputPumpTests.CancellationDuringStateInspectionDoesNotNeedAnotherWake",
+      "DesktopTwin.Tests.RelativeInputPumpTests.AGrantBecomingValidAfterTheSnapshotStillPrecedesInput",
+      "DesktopTwin.Tests.RelativeInputPumpTests.ExpiryBetweenQueuedPacketsDropsTheRemainder",
+      "DesktopTwin.Tests.RelativeInputPumpTests.TransportFailureStopsThePumpAtTheFailedExchange",
+      "DesktopTwin.Tests.InputHotPathTests.OnlyAnEmptyQueueTransitionRequiresAWake",
+      "DesktopTwin.Tests.InputWakeSignalTests.ClearingAnOldNotificationPreservesTheNextRacingSignal",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle",
+      "DesktopTwin.Tests.ReceiverPipeStreamTests.ABlockedReplyStillTimesOutAndReleasesHeldInput"
+    ]
+  },
   "WORK001": {
     "description": "Program launch is independent of settings writes; idle sessions and disarmed input peers do no periodic work, active input expiry and identity checks remain enforced, startup failures preserve their cause, presentation disposal releases subscribers, and snapshots do not start system verification.",
     "tests": [
