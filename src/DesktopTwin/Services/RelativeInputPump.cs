@@ -67,7 +67,8 @@ internal sealed class RelativeInputPump(RelativeInputTransport transport, InputP
                 exchangedAt = _now();
                 exchanged = true;
             }
-            if (exchanged) continue;
+            // Every new request, queue transition, revocation and shutdown leaves a wake token.
+            // Wait directly after IO; a forced empty pass only repeats the same state inspection.
             if (stop.IsCancellationRequested) break;
             var wait = armed ? (int)Math.Clamp(HeartbeatMilliseconds - (_now() - exchangedAt), 0, HeartbeatMilliseconds)
                 : Timeout.Infinite;

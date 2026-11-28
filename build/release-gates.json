@@ -260,6 +260,28 @@
       "DesktopTwin.Tests.ReceiverPipeStreamTests.ABlockedReplyStillTimesOutAndReleasesHeldInput"
     ]
   },
+  "INPUT008": {
+    "description": "Completed exchanges stop their native deadline without empty managed timer-queue wakes; one deadline still covers write and read, stale callbacks cannot expire newer IO, callback disposal cannot deadlock, passive queries do not force an empty state scan, and reused receiver completion events retain blocking and cleanup contracts.",
+    "tests": [
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.CompletedExchangesDisarmTheDeadlineAndLeaveIdleUncancelled",
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.NativeAllocationFailuresAreReportedWithoutRetainingTheOwner",
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.NativeContextDoesNotRootAnAbandonedOwnerAndItsCallbackIsHarmless",
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.RenewalSurvivesTheOldDeadlineButStillExpires",
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.QueuedCallbacksCannotExpireANewerOrIdleExchange",
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.DisposingFromTheCancellationCallbackDoesNotWaitOnItself",
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.DisposalAndExpirationCanRaceWithoutTouchingFreedContext",
+      "DesktopTwin.Tests.InputExchangeDeadlineTests.CancelledParentsAndInvalidDurationsCannotStartAnExchange",
+      "DesktopTwin.Tests.RelativeInputPumpTests.PassiveQueryWaitsForANewNotificationWithoutRescanningItsState",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.ABlockedWriteExpiresWithoutStartingARead",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.WriteAndReadShareOneDeadlineAndAPendingWriteObservesCancellation",
+      "DesktopTwin.Tests.ReceiverPipeStreamTests.ReusedCompletionEventsCannotCompleteTheNextPendingRead",
+      "DesktopTwin.Tests.RelativeInputPumpTests.RevocationAndRenewalDuringAGrantReplyCannotResurrectClearedInput",
+      "DesktopTwin.Tests.ReceiverPipeStreamTests.EveryTerminationReleasesHeldKeysAndButtonsOnce(termination: \"disconnect\")",
+      "DesktopTwin.Tests.ReceiverPipeStreamTests.EveryTerminationReleasesHeldKeysAndButtonsOnce(termination: \"timeout\")",
+      "DesktopTwin.Tests.ReceiverPipeStreamTests.ABlockedReplyStillTimesOutAndReleasesHeldInput",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
+    ]
+  },
   "WORK001": {
     "description": "Program launch is independent of settings writes; idle sessions and disarmed input peers do no periodic work, active input expiry and identity checks remain enforced, startup failures preserve their cause, presentation disposal releases subscribers, and snapshots do not start system verification.",
     "tests": [

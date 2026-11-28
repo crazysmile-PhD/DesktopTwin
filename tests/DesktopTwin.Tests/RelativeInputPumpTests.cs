@@ -8,6 +8,20 @@ namespace DesktopTwin.Tests;
 public sealed class RelativeInputPumpTests
 {
     [Fact]
+    public async Task PassiveQueryWaitsForANewNotificationWithoutRescanningItsState()
+    {
+        await using var rig = new Rig();
+        var inspections = 0;
+        rig.BeforeTakeRequest = () => inspections++;
+        rig.Request();
+        var run = rig.Run();
+        Assert.False(run.IsCompleted);
+        Assert.Equal(2, rig.Published);
+        Assert.Equal(1, inspections);
+        Assert.All(rig.Packets(), p => Assert.Equal((InputOperation.Heartbeat, 0, 0), p));
+    }
+
+    [Fact]
     public async Task QueuedRepliesReplaceStatusHeartbeatsAndKeepTransitionOrder()
     {
         await using var rig = new Rig { Until = 10000 };

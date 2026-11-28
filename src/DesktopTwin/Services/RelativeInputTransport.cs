@@ -11,7 +11,7 @@ namespace DesktopTwin.Services;
 internal sealed class RelativeInputTransport : IDisposable
 {
     private readonly Stream _stream;
-    private readonly CancellationTokenSource _deadline;
+    private readonly InputExchangeDeadline _deadline;
     private readonly byte[] _requestBytes = new byte[RelativeInputProtocol.PacketBytes];
     private readonly byte[] _statusBytes = new byte[RelativeInputProtocol.StatusBytes];
 
@@ -19,14 +19,14 @@ internal sealed class RelativeInputTransport : IDisposable
     {
         ArgumentNullException.ThrowIfNull(stream);
         _stream = stream;
-        _deadline = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        _deadline = new InputExchangeDeadline(stop);
     }
 
     /// <summary>The serialized owner awaits each result once; a timeout permanently ends the transport.</summary>
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
     internal async ValueTask<RelativeInputStatus> ExchangeAsync(InputPacket packet, uint sessionId)
     {
-        _deadline.CancelAfter(TimeSpan.FromSeconds(1));
+        _deadline.Begin();
         try
         {
             RelativeInputProtocol.WritePacket(_requestBytes, packet);
@@ -36,7 +36,7 @@ internal sealed class RelativeInputTransport : IDisposable
             if (status.SessionId != sessionId) throw new IOException("Input receiver session changed.");
             return status;
         }
-        finally { _deadline.CancelAfter(Timeout.InfiniteTimeSpan); }
+        finally { _deadline.End(); }
     }
 
     public void Dispose()

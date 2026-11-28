@@ -8,6 +8,17 @@ namespace DesktopTwin.Tests;
 /// <summary>Exercises completed and genuinely suspended IO without allocating a task in the test peer.</summary>
 public sealed class RelativeInputAsyncTests
 {
+    [Fact]
+    public async Task ABlockedWriteExpiresWithoutStartingARead()
+    {
+        using var blocked = new DelayedReplyStream(Timeout.Infinite, 0);
+        using var transport = new RelativeInputTransport(blocked, default);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            transport.ExchangeAsync(new(InputOperation.Heartbeat), 17).AsTask());
+        Assert.False(blocked.WriteCompleted);
+        Assert.Equal(0, blocked.Reads);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
