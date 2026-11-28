@@ -315,6 +315,28 @@ public sealed class RelativeInputReceiverTests
         Assert.Equal(3, wrongParent.ExitCode);
     }
 
+    [Fact]
+    public async Task RealFrameworkReceiverCancelsATruncatedFrameWhenItsLeaseExpires()
+    {
+        using var pipe = NewPipe(out var name);
+        using var receiver = Start(name, Environment.ProcessId, Process.GetCurrentProcess().SessionId);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            await pipe.WaitForConnectionAsync(timeout.Token);
+            await pipe.ReadExactlyAsync(new byte[12], timeout.Token);
+            var request = new byte[RelativeInputProtocol.PacketBytes];
+            RelativeInputProtocol.WritePacket(request, new(InputOperation.Heartbeat, 1));
+            await pipe.WriteAsync(request, timeout.Token);
+            await pipe.ReadExactlyAsync(new byte[RelativeInputProtocol.StatusBytes], timeout.Token);
+            // A complete move is never sent, so this process test cannot inject any desktop input.
+            await pipe.WriteAsync(new byte[] { (byte)InputOperation.Move }, timeout.Token);
+            await receiver.WaitForExitAsync(timeout.Token);
+            Assert.Equal(1, receiver.ExitCode);
+        }
+        finally { await StopAsync(receiver); }
+    }
+
     private static NamedPipeServerStream NewPipe(out string name)
     {
         name = "DesktopTwin.Input." + Guid.NewGuid().ToString("N");

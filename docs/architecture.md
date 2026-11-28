@@ -96,6 +96,12 @@ UI 的连续采样只续租，授权改变才唤醒通道，不重复排队 Rese
 
 主端和 Framework 接收端共用小端固定帧编解码：请求 9 字节、状态 36 字节、握手 12 字节，协议版本仍为 1。接收端在复用缓冲中完整读取一帧，分段读取和 EOF 都显式处理；删除中间内存流、BinaryReader/BinaryWriter 包装及逐字段读取。主端直接等待传输并发布状态，不再为每次交换包一层异步方法。
 
+Framework 接收端的 `ReceiverPipeStream` 继续使用 overlapped 管道，由原来的单个接收线程串行读写；每连接固定两个已钉住的缓冲、一个完成事件和一块 OVERLAPPED 存储，握手复用状态缓冲的前 12 字节。事件句柄低位按 Win32 契约设置，抑制该句柄上的 IOCP 通知，直接等待内核完成；不再进入 Framework 的逐次 APM 结果、等待对象及完成回调路径。读写只能使用自有缓冲，分段读与短写按实际字节数推进。
+
+取消与提交共用一把短锁，停止标志先阻止新 IO；`CancelIoEx` 请求取消并关闭端点后，接收线程仍等到挂起操作的完成事件，`Dispose` 等到该操作退出后才解除钉住并释放事件／OVERLAPPED。`ReceiverLoop` 独占 `InputLease`，在 EOF、非法包、显式关闭、读写超时的 finally 中释放输入，看门狗只取消 IO。单次看门狗保留启动等待和 1500ms 活动期限；更新活动期限不重复重启计时器，未授权时只在首次请求或撤权时停用，不重复写入相同期限。
+
+原生依据：[完成事件的低位与 IOCP 通知](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getqueuedcompletionstatus)、[CancelIoEx 的取消／排空契约](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex)、[GetOverlappedResult 与完成事件](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult)。
+
 `RelativeInputStatus` 是只读值快照，短锁保护发布和读取，复用线缆缓冲不会改写读者已持有的状态。本地 `Sequence` 每个完整有效回复递增，不上协议；字段相同的新回复仍可与旧快照区分。原生输入由单个接收线程拥有一个 INPUT 数组，每次复用前完整清零 union，再写入鼠标、键盘或滚轮字段；结构大小只计算一次。未授权状态重复查询不再反复停用已停用的看门狗。
 
 此通道不创建自启项、不安装驱动，也没有任意程序或脚本命令。`InputLease` 在撤销、断线与退出时释放已注入的键/按钮；菜单释放指针按钮而保留诊断端按住的 Alt。API 测试的位移和键可进入同一会话内通道；硬件捕获仍须额外实测。实现参考 [RDPRelativeInput](https://github.com/TKMAX777/RDPRelativeInput)、[Moonlight](https://github.com/moonlight-stream/moonlight-qt/tree/master/app/streaming/input) 与 [GamingAnywhere 5.1.5](https://chuang.zoolab.org/pubs/pdf/2013mmsys.pdf)，以 C# 独立实现；没有引入其二进制或驱动。
