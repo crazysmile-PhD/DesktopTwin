@@ -9,6 +9,25 @@ namespace DesktopTwin.Tests;
 [Collection(WindowsDesktopTestGroup.Name)]
 public sealed class ReceiverPipeStreamTests
 {
+    [Fact]
+    public Task ReusedCompletionEventsCannotCompleteTheNextPendingRead() => WithPipeAsync(async (server, io) =>
+    {
+        for (var round = 0; round < 8; round++)
+        {
+            await server.WriteAsync(new byte[] { (byte)round });
+            Assert.Equal(1, io.Read(io.RequestBytes, 0, 1));
+            Assert.Equal((byte)round, io.RequestBytes[0]);
+            var read = Task.Run(() => io.Read(io.RequestBytes, 0, 1));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (!io.IsIoPending && !read.IsCompleted) await Task.Delay(1, timeout.Token);
+            await Task.Delay(30, timeout.Token);
+            Assert.False(read.IsCompleted);
+            await server.WriteAsync(new byte[] { 123 }, timeout.Token);
+            Assert.Equal(1, await read.WaitAsync(timeout.Token));
+            Assert.Equal(123, io.RequestBytes[0]);
+        }
+    });
+
     [Theory]
     [InlineData("disconnect")]
     [InlineData("partial")]

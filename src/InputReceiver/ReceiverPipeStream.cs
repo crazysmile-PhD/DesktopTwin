@@ -101,7 +101,7 @@ namespace DesktopTwinInputReceiver
                 _writing = write;
                 try
                 {
-                    _completion.Reset();
+                    // ReadFile/WriteFile reset this OVERLAPPED event before starting the operation.
                     Marshal.WriteIntPtr(_overlapped, 0, IntPtr.Zero);
                     Marshal.WriteIntPtr(_overlapped, IntPtr.Size, IntPtr.Zero);
                     var success = write ? WriteFile(_handle, address, count, IntPtr.Zero, _overlapped)

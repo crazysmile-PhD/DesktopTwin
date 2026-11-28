@@ -59,6 +59,10 @@ CPU 比较使用引用实际生产 DLL 的独立宿主和未包装的 Framework 
 
 输入热路径先删除重复校验、逐字段读写和会话交换的额外异步包装，再用固定环形队列、只读值状态及接收端自有 INPUT 数组减少分配。固定请求/状态帧及逐笔确认继续沿用；没有增加采样任务或回复触发的 UI 调度。
 
+被动查询还须记录 [JitInfo 的编译数量／时间](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.jitinfo) 和 ThreadPool.CompletedWorkItemCount。低频查询仅按秒预热可能不足以覆盖分层编译，首轮周期增量不能直接当成稳态退化。对照保留旧的 10 秒预热结果，再以 1,000 次已确认查询、10 秒实际场景及 5 秒静置预热；逐轮报告 JIT 工作，不能只挑没有编译的一轮。ThreadPool 完成数是整个宿主的工作项计数，不等同于内核线程唤醒或上下文切换。
+
+停用 CancellationTokenSource.CancelAfter 的逻辑计时器不一定移除已经安排的底层计时器队列唤醒；[运行时 TimerQueue 源码](https://github.com/dotnet/runtime/blob/v10.0.5/src/libraries/System.Private.CoreLib/src/System/Threading/Timer.cs) 的删除路径只移除逻辑计时器。定位时可在隔离诊断副本中禁用超时安排，核对每次查询之外的工作项是否消失；该副本不得用于实际运行或发布。生产实现仍保留同一 1 秒 IO 截止，以可停用的原生单次计时器删除空回调；被动查询后直接等待新通知，并省去接收端由系统重复执行的事件复位。启动预算、活动心跳与租约看门狗分别计量，不把剩余启动期工作算成永久空闲轮询。
+
 分配回归在预热后执行 10,000 次，使用 `GC.GetAllocatedBytesForCurrentThread`，将初始化与断言放在测量区外。它们要求队列入出、固定帧编解码、状态值解码、原生输入准备及状态编码的测量区间为零托管分配。原生准备测试编译实际接收端源码，检查复用数组和混合输入的 union 清零，但不调用 SendInput；真实 Framework 接收端另以状态/心跳验证帧格式、空闲、撤权和断线。此结果不包含异步 I/O、任务、异常或 SendInput 本身的所有开销。
 
 异步路径另行测量。每次交换返回只消费一次的池化 ValueTask；容量 1 的通知缓冲合并唤醒，一个复用单次计时器替代逐次超时等待，撤权后停用。`RelativeInputAsyncTests` 用可控、无分配的 IO 源分别验证同步完成和实际挂起的写入／分段读取；`InputWakeSignalTests` 验证缓冲、挂起、计时及关闭，Release 预热后的单线程测量区间要求零托管分配。Debug 编译器另外创建调试用的类状态机，同一组功能测试照常执行，交换的零分配断言只针对生产 Release 配置。这些受控测试不能代表内核 IO 的全部开销。
