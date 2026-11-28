@@ -181,11 +181,13 @@
     ]
   },
   "INPUT003": {
-    "description": "Foreground cursor discovery is passive and coalesced; capture keeps its short lease, background revokes input, and a one-shot status query cannot restart periodic heartbeats.",
+    "description": "One UI timer owns passive cursor discovery; a missing input window cannot trigger remote queries or reset throttling, capture keeps its short lease, and a one-shot status query cannot restart periodic heartbeats.",
     "tests": [
       "DesktopTwin.Tests.RelativeInputActivityTests.ForegroundWithoutCaptureOnlyRequestsCoalescedPassiveDiscovery",
       "DesktopTwin.Tests.RelativeInputActivityTests.CaptureRenewsItsShortLeaseAndReleaseReturnsToPassiveDiscovery",
       "DesktopTwin.Tests.RelativeInputActivityTests.BackgroundStopsDiscoveryAndRevokesEvenCapturedOrExplicitKeyInput",
+      "DesktopTwin.Tests.RelativeInputActivityTests.MissingInputWindowNeverRequestsStatusOrAuthorizesInput",
+      "DesktopTwin.Tests.RelativeInputActivityTests.InputWindowRecoveryDoesNotResetDiscoveryDeadline",
       "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
     ]
   },

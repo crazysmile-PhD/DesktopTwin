@@ -150,10 +150,9 @@ public sealed class RelativeInputReceiverTests
                     return Task.CompletedTask;
                 });
             while (session.Status is null) await Task.Delay(10, timeout.Token);
-            var refreshed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            session.StatusRefreshCompleted += (_, _) => refreshed.TrySetResult();
+            var beforeRefresh = session.Status;
             session.RequestStatus();
-            await refreshed.Task.WaitAsync(timeout.Token);
+            await WaitForStatusChangeAsync(session, beforeRefresh, timeout.Token);
             var passive = session.Status;
             await Task.Delay(1800, timeout.Token);
             Assert.Same(passive, session.Status);
@@ -164,14 +163,20 @@ public sealed class RelativeInputReceiverTests
             await WaitForStatusChangeAsync(session, passive, timeout.Token);
             var active = session.Status;
             await WaitForStatusChangeAsync(session, active, timeout.Token);
+            var previous = session.Status;
             session.SetForegroundLease(false);
-            var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            session.StatusRefreshCompleted += (_, _) => released.TrySetResult();
-            session.RequestStatus();
-            await released.Task.WaitAsync(timeout.Token);
+            var changes = 0;
+            var observation = Stopwatch.StartNew();
+            while (observation.ElapsedMilliseconds < 1800)
+            {
+                var current = session.Status;
+                if (!ReferenceEquals(previous, current)) { changes++; previous = current; }
+                await Task.Delay(5, timeout.Token);
+            }
+            // One already in-flight active reply may precede the single revocation reply.
+            // Continued heartbeats would exceed this bound during the observation window.
+            Assert.InRange(changes, 1, 2);
             var idle = session.Status;
-            await Task.Delay(1800, timeout.Token);
-            Assert.Same(idle, session.Status);
             Assert.True(session.Ready);
             Assert.NotNull(idle);
             Assert.Equal(0, idle.HeldCount);

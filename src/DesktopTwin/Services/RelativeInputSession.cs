@@ -30,7 +30,6 @@ internal sealed class RelativeInputSession : IDisposable
     private int _ready;
     internal bool Ready => Volatile.Read(ref _ready) != 0;
     internal string? Failure { get; private set; }
-    internal event EventHandler? StatusRefreshCompleted;
     internal string PipeName { get; } = "DesktopTwin.Input." + Guid.NewGuid().ToString("N");
 
     internal RelativeInputSession()
@@ -188,7 +187,6 @@ internal sealed class RelativeInputSession : IDisposable
                     await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false);
                     armed = allowed;
                     exchangedAt = Environment.TickCount64;
-                    if (statusRequested) StatusRefreshCompleted?.Invoke(this, EventArgs.Empty);
                 }
                 while (_queue.TryTake(out var packet))
                 {

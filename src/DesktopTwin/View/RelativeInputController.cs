@@ -58,14 +58,6 @@ internal sealed class RelativeInputController : IDisposable
     private void OnLogin(object? sender, EventArgs e) { _failed = false; Failure = null; StopSession(); Synchronize(); }
     private void OnActivityChanged(object? sender, EventArgs e) => Synchronize();
     private void OnVisibility(object sender, DependencyPropertyChangedEventArgs e) => Synchronize();
-    private void OnStatusRefreshCompleted(object? sender, EventArgs e)
-    {
-        if (_window.Dispatcher.HasShutdownStarted) return;
-        _ = _window.Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (ReferenceEquals(sender, _session)) Synchronize();
-        }));
-    }
     private bool Send(InputPacket packet) => _session?.TrySend(packet) == true;
     internal bool SendKey(ushort scan, bool up)
     {
@@ -115,18 +107,24 @@ internal sealed class RelativeInputController : IDisposable
         var handle = new WindowInteropHelper(_window).Handle;
         var foreground = _window.IsVisible && _window.WindowState != WindowState.Minimized
             && ChildSessionNativeMethods.GetForegroundWindow() == handle && !_settings.Current.Session.WatchMode;
-        if (!foreground || !session.Ready) { _poll.Stop(); Release(); return; }
-        UpdateCapture();
-        _activity.Update(true, Captured, _injectedKeys.Count != 0);
+        if (!foreground || !session.Ready)
+        {
+            _poll.Stop();
+            Release();
+            _activity.Update(false, false, false);
+            return;
+        }
+        var inputAvailable = UpdateCapture();
+        _activity.Update(true, Captured, _injectedKeys.Count != 0, inputAvailable);
         if (_activity.PollInterval is { } interval && _poll.Interval != interval) _poll.Interval = interval;
         _poll.Start();
     }
-    private void UpdateCapture()
+    private bool UpdateCapture()
     {
         var alt = RawMouseNative.GetAsyncKeyState(0x12) < 0;
         _gesture.ObserveModifiers(alt, RawMouseNative.GetAsyncKeyState(0x11) < 0);
         var inputWindow = ChildSessionNativeMethods.GetRdpInputWindow(_window.RdpHost.Handle);
-        if (inputWindow == 0) { Release(); return; }
+        if (inputWindow == 0) { Release(); return false; }
         _capture.Observe(inputWindow, _window.RdpHost.Handle);
         WindowNativeMethods.TryGetWindowRect(_window.RdpHost.Handle, out var bounds);
         var point = DiagnosticInput.Cursor();
@@ -134,9 +132,10 @@ internal sealed class RelativeInputController : IDisposable
         var capture = !alt && !_gesture.Released && Status?.CursorVisible == false && inside
             && (Captured || !_capture.HasLegacyButtons)
             && ChildSessionNativeMethods.IsRdpInputWindowFocused(_window.RdpHost.Handle);
-        if (!capture) { ReleasePointer(); return; }
+        if (!capture) { ReleasePointer(); return true; }
         _capture.Start(inputWindow, bounds);
         _capture.Constrain(bounds);
+        return true;
     }
     private async Task StartSessionAsync(uint id)
     {
@@ -149,7 +148,6 @@ internal sealed class RelativeInputController : IDisposable
             session = await RelativeInputSession.ConnectAsync(id, start.Token);
             start.Token.ThrowIfCancellationRequested();
             _session = session;
-            session.StatusRefreshCompleted += OnStatusRefreshCompleted;
             _sessionId = id;
             Failure = null;
             if (!start.IsCancellationRequested && _window.DataContext is MainWindowViewModel vm)
@@ -183,15 +181,14 @@ internal sealed class RelativeInputController : IDisposable
         _capture.ClearLegacyButtons();
         _gesture.ClearModifiers();
         _injectedKeys.Clear();
-        _activity.Update(false, false, false);
     }
     private void StopSession()
     {
         _poll.Stop();
         Release();
+        _activity.Update(false, false, false);
         _capture.Detach();
         _starting?.Cancel();
-        if (_session is { } session) session.StatusRefreshCompleted -= OnStatusRefreshCompleted;
         _session?.Dispose();
         _session = null;
         _sessionId = null;

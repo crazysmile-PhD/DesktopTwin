@@ -12,9 +12,9 @@ internal sealed class RelativeInputActivity(Action<bool> authorize, Action reque
     internal bool Authorized { get; private set; }
 
     /// <summary>Foreground discovery cannot authorize input; leaving the foreground stops both activities.</summary>
-    internal void Update(bool foreground, bool captured, bool keysHeld)
+    internal void Update(bool foreground, bool captured, bool keysHeld, bool inputAvailable = true)
     {
-        Authorized = foreground && (captured || keysHeld);
+        Authorized = foreground && inputAvailable && (captured || keysHeld);
         authorize(Authorized);
         PollInterval = foreground ? (Authorized ? CaptureInterval : DiscoveryInterval) : null;
         if (!foreground || Authorized)
@@ -22,6 +22,8 @@ internal sealed class RelativeInputActivity(Action<bool> authorize, Action reque
             _lastDiscovery = null;
             return;
         }
+        // Losing the local input window revokes input but must not reset the discovery deadline.
+        if (!inputAvailable) return;
         if (_lastDiscovery is { } last && timeProvider.GetElapsedTime(last) < DiscoveryInterval) return;
         _lastDiscovery = timeProvider.GetTimestamp();
         requestStatus();
