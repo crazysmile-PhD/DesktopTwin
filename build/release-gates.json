@@ -282,6 +282,30 @@
       "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
     ]
   },
+  "INPUT009": {
+    "description": "One borrowed overlapped pipe and native wait reuse buffers and completion state; synchronous IO returns directly and suspended IO resumes on its completion worker, arbitrary caller threads hand off before issuing event-based IO, single consumption prevents storage reuse, cancellation/disposal drain IO, and the existing deadline, lease and held-input release contracts remain enforced.",
+    "tests": [
+      "DesktopTwin.Tests.InputPipeStreamTests.PendingReadResumesOnItsCompletionWorkerAndCanDisposeInline",
+      "DesktopTwin.Tests.RelativeInputTransportTests.ExchangesOutliveAShortLivedCallerThread",
+      "DesktopTwin.Tests.RelativeInputSessionTests.ExchangeFailureClosesThePeerBeforeSessionDisposal(missingReply: False)",
+      "DesktopTwin.Tests.RelativeInputSessionTests.ExchangeFailureClosesThePeerBeforeSessionDisposal(missingReply: True)",
+      "DesktopTwin.Tests.InputPipeStreamTests.FragmentedStatusKeepsOffsetsAndEofIsNotReportedAsAFullFrame",
+      "DesktopTwin.Tests.InputPipeStreamTests.PendingResultsMustBeReadyAndConsumedBeforeStorageIsReused",
+      "DesktopTwin.Tests.InputPipeStreamTests.PendingWritesObserveCancellationAndPeerFailure(cancel: False)",
+      "DesktopTwin.Tests.InputPipeStreamTests.PendingWritesObserveCancellationAndPeerFailure(cancel: True)",
+      "DesktopTwin.Tests.InputPipeStreamTests.DisposalAndCompletionRaceWithoutFreeingActiveNativeStorage",
+      "DesktopTwin.Tests.InputPipeStreamTests.DisposingAPendingReadDrainsItAndLeavesTheCallerPipeOpen",
+      "DesktopTwin.Tests.InputPipeStreamTests.WarmSynchronousAndSuspendedOwnedIoAllocateNoManagedObjects",
+      "DesktopTwin.Tests.InputPipeStreamTests.AllocationFailuresAndInvalidOwnershipDoNotCloseTheCallerPipe",
+      "DesktopTwin.Tests.InputPipeStreamTests.InvalidConstructionAndACollectedCallbackTargetAreSafe",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.ABlockedWriteExpiresWithoutStartingARead",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.WriteAndReadShareOneDeadlineAndAPendingWriteObservesCancellation",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.RealReceiverReportsItsSessionAndExitsWhenHostDisconnects",
+      "DesktopTwin.Tests.ReceiverPipeStreamTests.EveryTerminationReleasesHeldKeysAndButtonsOnce(termination: \"disconnect\")",
+      "DesktopTwin.Tests.ReceiverPipeStreamTests.ABlockedReplyStillTimesOutAndReleasesHeldInput"
+    ]
+  },
   "WORK001": {
     "description": "Program launch is independent of settings writes; idle sessions and disarmed input peers do no periodic work, active input expiry and identity checks remain enforced, startup failures preserve their cause, presentation disposal releases subscribers, and snapshots do not start system verification.",
     "tests": [

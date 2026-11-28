@@ -59,6 +59,10 @@ CPU 比较使用引用实际生产 DLL 的独立宿主和未包装的 Framework 
 
 输入热路径先删除重复校验、逐字段读写和会话交换的额外异步包装，再用固定环形队列、只读值状态及接收端自有 INPUT 数组减少分配。固定请求/状态帧及逐笔确认继续沿用；没有增加采样任务或回复触发的 UI 调度。
 
+分析线程池完成数时，分开测完整会话、直接交换、仅异步写、仅异步读及同步原生读写对照。仅读／仅写使用隔离探针的原生辅助完成另一半操作，用来归因调度次数，不直接等同于生产路径的性能。BCL 的 [PipeValueTaskSource](https://github.com/dotnet/runtime/blob/v10.0.5/src/libraries/System.IO.Pipes/src/System/IO/Pipes/PipeStream.ValueTaskSource.cs) 默认异步运行续体，因此 IO 完成回调和后续排队是两次不同工作。仅在隔离探针中修改该标志可核验归因，生产实现不访问 BCL 私有成员。
+
+主端完成等待改为原生线程池回调后，ThreadPool.CompletedWorkItemCount 不包含这类原生回调。须另报挂起原生操作数，并继续使用两端所有线程的进程 CPU 时间／周期；不能把托管完成数的降幅直接当成总唤醒、CPU 或功耗降幅。探针可在采样边界读取源的版本差以核对挂起次数，生产热路径不为测量增加逐包计数。续体内关闭、结果消费与原生存储排空均有真实管道回归，受控同步和挂起区间仍验证零托管分配。
+
 被动查询还须记录 [JitInfo 的编译数量／时间](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.jitinfo) 和 ThreadPool.CompletedWorkItemCount。低频查询仅按秒预热可能不足以覆盖分层编译，首轮周期增量不能直接当成稳态退化。对照保留旧的 10 秒预热结果，再以 1,000 次已确认查询、10 秒实际场景及 5 秒静置预热；逐轮报告 JIT 工作，不能只挑没有编译的一轮。ThreadPool 完成数是整个宿主的工作项计数，不等同于内核线程唤醒或上下文切换。
 
 停用 CancellationTokenSource.CancelAfter 的逻辑计时器不一定移除已经安排的底层计时器队列唤醒；[运行时 TimerQueue 源码](https://github.com/dotnet/runtime/blob/v10.0.5/src/libraries/System.Private.CoreLib/src/System/Threading/Timer.cs) 的删除路径只移除逻辑计时器。定位时可在隔离诊断副本中禁用超时安排，核对每次查询之外的工作项是否消失；该副本不得用于实际运行或发布。生产实现仍保留同一 1 秒 IO 截止，以可停用的原生单次计时器删除空回调；被动查询后直接等待新通知，并省去接收端由系统重复执行的事件复位。启动预算、活动心跳与租约看门狗分别计量，不把剩余启动期工作算成永久空闲轮询。

@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -175,11 +176,18 @@ internal sealed class RelativeInputSession : IDisposable
                 () => Interlocked.Read(ref _armedUntil), TakeStatusRequest, PublishStatus);
             await pump.RunAsync(sessionId, _stop.Token).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException or Win32Exception)
         {
             if (!_stop.IsCancellationRequested) { Failure = error.Message; AppLog.Warn("相对输入通道已断开。", error); }
         }
-        finally { Volatile.Write(ref _ready, 0); _pipe.Dispose(); }
+        finally
+        {
+            Volatile.Write(ref _ready, 0);
+            // Release the adapter's borrowed handle before closing the pipe, including loop failures
+            // that precede an explicit session disposal. Otherwise the peer cannot observe EOF.
+            try { _transport.Dispose(); }
+            finally { _pipe.Dispose(); }
+        }
     }
     private void PublishStatus(RelativeInputStatus status)
     {
