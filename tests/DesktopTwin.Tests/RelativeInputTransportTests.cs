@@ -20,8 +20,8 @@ public sealed class RelativeInputTransportTests
             {
                 var request = new byte[RelativeInputProtocol.PacketBytes];
                 await peer.ReadExactlyAsync(request);
-                using var reader = new BinaryReader(new MemoryStream(request));
-                var actual = RelativeInputProtocol.ReadPacket(reader);
+                using var frame = new MemoryStream(request);
+                var actual = RelativeInputProtocol.ReadPacket(frame, request);
                 Assert.Equal((expected[i].Operation, expected[i].X, expected[i].Y), (actual.Operation, actual.X, actual.Y));
                 var status = Status(session: 17, moves: i);
                 for (var offset = 0; offset < status.Length; offset += 7)

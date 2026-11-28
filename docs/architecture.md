@@ -88,6 +88,12 @@ ActiveX 的 [EnableAutoReconnect](https://learn.microsoft.com/en-us/windows/win3
 
 UI 的连续采样只续租，授权改变才唤醒通道，不重复排队 Reset。`RequestStatus` 合并一次被动刷新，使用现有未授权心跳取回光标状态，完成后不安排周期交换；它不能授予租约。后台撤权并释放输入后，主端阻塞等新授权/请求，接收端停止看门狗并阻塞等管道数据或 EOF。实际授权期间每 50ms 交换状态，已有输入交换会延后重复心跳。活动阶段使用一个单次看门狗，收到输入只更新截止时间，到期回调按最新截止时间决定关闭或继续观察。收发仍只有一个串行所有者，复用编解码缓冲和一次性超时来源；保留逐笔确认与既有 36-byte 协议，没有增加双向后台循环或批次协议。
 
+输入队列使用固定 128 槽环形缓冲，只合并末尾相邻移动；满队列仍可合并末尾移动，数值越界和无法入队仍报告失败。清空只重置索引，因为数据包仅含值字段。`InputPacket` 在构造和线缆解码边界校验，队列、编码及租约处理不再重复校验同一不可变值。
+
+主端和 Framework 接收端共用小端固定帧编解码：请求 9 字节、状态 36 字节、握手 12 字节，协议版本仍为 1。接收端在复用缓冲中完整读取一帧，分段读取和 EOF 都显式处理；删除中间内存流、BinaryReader/BinaryWriter 包装及逐字段读取。主端直接等待传输并发布状态，不再为每次交换包一层异步方法。
+
+`RelativeInputStatus` 是只读值快照，短锁保护发布和读取，复用线缆缓冲不会改写读者已持有的状态。本地 `Sequence` 每个完整有效回复递增，不上协议；字段相同的新回复仍可与旧快照区分。原生输入由单个接收线程拥有一个 INPUT 数组，每次复用前完整清零 union，再写入鼠标、键盘或滚轮字段；结构大小只计算一次。未授权状态重复查询不再反复停用已停用的看门狗。
+
 此通道不创建自启项、不安装驱动，也没有任意程序或脚本命令。`InputLease` 在撤销、断线与退出时释放已注入的键/按钮；菜单释放指针按钮而保留诊断端按住的 Alt。API 测试的位移和键可进入同一会话内通道；硬件捕获仍须额外实测。实现参考 [RDPRelativeInput](https://github.com/TKMAX777/RDPRelativeInput)、[Moonlight](https://github.com/moonlight-stream/moonlight-qt/tree/master/app/streaming/input) 与 [GamingAnywhere 5.1.5](https://chuang.zoolab.org/pubs/pdf/2013mmsys.pdf)，以 C# 独立实现；没有引入其二进制或驱动。
 
 显式传入 `--control-pipe` 时，`App` 持有本地测试桥接并在关闭时取消它。`Diagnostics.LocalControlBridge` 只负责当前用户 ACL、请求边界与协议；`View.DesktopControlTarget` 在 Dispatcher 上调用既有命令、读取状态和核对前台/输入焦点，`Interop.DiagnosticInput` 提供有限的原生输入。普通启动没有监听器。协议与实际验证边界见[本地交互测试桥接](local-control.md)。

@@ -110,13 +110,14 @@ public sealed class RelativeInputReceiverTests
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             while (session.Status is null) await Task.Delay(20, deadline.Token);
             Assert.True(session.Ready);
-            Assert.Equal(Process.GetCurrentProcess().SessionId, session.Status.SessionId);
-            Assert.Equal(0, session.Status.InjectedMoves);
-            Assert.Equal(0, session.Status.HeldCount);
-            var initialStatus = session.Status;
+            var initialStatus = session.Status ?? throw new InvalidOperationException("Missing receiver status.");
+            Assert.Equal(Process.GetCurrentProcess().SessionId, initialStatus.SessionId);
+            Assert.Equal(0, initialStatus.InjectedMoves);
+            Assert.Equal(0, initialStatus.HeldCount);
+            Assert.True(initialStatus.Sequence > 0);
             // Longer than the active lease: an unarmed peer must survive without background exchanges.
             await Task.Delay(1800, deadline.Token);
-            Assert.Same(initialStatus, session.Status);
+            Assert.Equal(initialStatus, session.Status);
             Assert.NotNull(receiver);
             Assert.False(receiver.HasExited);
             session.Dispose();
@@ -150,12 +151,13 @@ public sealed class RelativeInputReceiverTests
                     return Task.CompletedTask;
                 });
             while (session.Status is null) await Task.Delay(10, timeout.Token);
-            var beforeRefresh = session.Status;
+            var beforeRefresh = session.Status ?? throw new InvalidOperationException("Missing receiver status.");
             session.RequestStatus();
             await WaitForStatusChangeAsync(session, beforeRefresh, timeout.Token);
-            var passive = session.Status;
+            var passive = session.Status ?? throw new InvalidOperationException("Missing receiver status.");
+            Assert.Equal(beforeRefresh.Sequence + 1, passive.Sequence);
             await Task.Delay(1800, timeout.Token);
-            Assert.Same(passive, session.Status);
+            Assert.Equal(passive, session.Status);
             Assert.True(session.Ready);
 
             // Authorize heartbeats only: this test never injects a mouse/key/button into the desktop.
@@ -170,15 +172,14 @@ public sealed class RelativeInputReceiverTests
             while (observation.ElapsedMilliseconds < 1800)
             {
                 var current = session.Status;
-                if (!ReferenceEquals(previous, current)) { changes++; previous = current; }
+                if (previous != current) { changes++; previous = current; }
                 await Task.Delay(5, timeout.Token);
             }
             // One already in-flight active reply may precede the single revocation reply.
             // Continued heartbeats would exceed this bound during the observation window.
             Assert.InRange(changes, 1, 2);
-            var idle = session.Status;
+            var idle = session.Status ?? throw new InvalidOperationException("Missing receiver status.");
             Assert.True(session.Ready);
-            Assert.NotNull(idle);
             Assert.Equal(0, idle.HeldCount);
             Assert.Equal(0, idle.InjectedMoves);
             Assert.NotNull(receiver);
@@ -194,7 +195,7 @@ public sealed class RelativeInputReceiverTests
     private static async Task WaitForStatusChangeAsync(RelativeInputSession session,
         RelativeInputStatus? previous, CancellationToken cancellationToken)
     {
-        while (ReferenceEquals(previous, session.Status)) await Task.Delay(5, cancellationToken);
+        while (previous == session.Status) await Task.Delay(5, cancellationToken);
     }
 
     [Fact]
@@ -208,9 +209,10 @@ public sealed class RelativeInputReceiverTests
             await pipe.WaitForConnectionAsync(timeout.Token);
             var hello = new byte[12];
             await pipe.ReadExactlyAsync(hello, timeout.Token);
-            using var writer = new BinaryWriter(pipe, System.Text.Encoding.UTF8, leaveOpen: true);
             // Authorize a lease without sending any key/button/move; expiry still closes the channel.
-            RelativeInputProtocol.WritePacket(writer, new(InputOperation.Heartbeat, 1));
+            var request = new byte[RelativeInputProtocol.PacketBytes];
+            RelativeInputProtocol.WritePacket(request, new(InputOperation.Heartbeat, 1));
+            await pipe.WriteAsync(request, timeout.Token);
             var status = new byte[RelativeInputProtocol.StatusBytes];
             await pipe.ReadExactlyAsync(status, timeout.Token);
             await receiver.WaitForExitAsync(timeout.Token);

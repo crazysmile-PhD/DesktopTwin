@@ -16,7 +16,6 @@ namespace DesktopTwin.Input
         internal InputLease(Action<InputPacket> inject) { _inject = inject; }
         internal void Apply(InputPacket packet)
         {
-            packet.Validate();
             if (packet.Operation == InputOperation.Heartbeat)
             {
                 if (packet.X == 0) Reset();
