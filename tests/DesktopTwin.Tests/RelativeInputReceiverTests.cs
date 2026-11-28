@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Runtime.ExceptionServices;
 using DesktopTwin.Input;
 using DesktopTwin.Services;
 
@@ -196,6 +197,87 @@ public sealed class RelativeInputReceiverTests
         RelativeInputStatus? previous, CancellationToken cancellationToken)
     {
         while (previous == session.Status) await Task.Delay(5, cancellationToken);
+    }
+
+    [Fact]
+    public async Task BurstRequestsAndQueuedControlsCoalesceWithoutThrowingSignalExceptions()
+    {
+        Process? receiver = null;
+        RelativeInputSession? session = null;
+        var signalExceptions = 0;
+        EventHandler<FirstChanceExceptionEventArgs> handler = (_, e) =>
+        {
+            if (e.Exception is SemaphoreFullException
+                && e.Exception.StackTrace?.Contains("RelativeInputSession.Signal", StringComparison.Ordinal) == true)
+                Interlocked.Increment(ref signalExceptions);
+        };
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            session = await RelativeInputSession.ConnectAsync((uint)Process.GetCurrentProcess().SessionId, timeout.Token,
+                (path, arguments, _) =>
+                {
+                    receiver = Process.Start(new ProcessStartInfo(path, arguments) { UseShellExecute = false, CreateNoWindow = true });
+                    return Task.CompletedTask;
+                });
+            while (session.Status is null) await Task.Delay(5, timeout.Token);
+            AppDomain.CurrentDomain.FirstChanceException += handler;
+            await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+            {
+                for (var i = 0; i < 2500; i++) session.RequestStatus();
+            }, timeout.Token)));
+            // A disarmed session drops these bounded controls; no input transition is ever requested.
+            for (var i = 0; i < 64; i++) Assert.True(session.TrySend(new(InputOperation.ReleasePointer)));
+            AppDomain.CurrentDomain.FirstChanceException -= handler;
+            Assert.Equal(0, Volatile.Read(ref signalExceptions));
+            var previous = session.Status;
+            session.RequestStatus();
+            await WaitForStatusChangeAsync(session, previous, timeout.Token);
+            Assert.True(session.Ready);
+            Assert.Equal(0, session.Status?.HeldCount);
+            Assert.Equal(0, session.Status?.InjectedMoves);
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= handler;
+            session?.Dispose();
+            if (session is not null) await session.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            if (receiver is not null) { await StopAsync(receiver); receiver.Dispose(); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisposeWakesIdleOrActiveLoopWithoutAnotherStatusRequest(bool armed)
+    {
+        Process? receiver = null;
+        RelativeInputSession? session = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            session = await RelativeInputSession.ConnectAsync((uint)Process.GetCurrentProcess().SessionId, timeout.Token,
+                (path, arguments, _) =>
+                {
+                    receiver = Process.Start(new ProcessStartInfo(path, arguments) { UseShellExecute = false, CreateNoWindow = true });
+                    return Task.CompletedTask;
+                });
+            while (session.Status is null) await Task.Delay(5, timeout.Token);
+            var previous = session.Status;
+            if (armed) { session.SetForegroundLease(true); await WaitForStatusChangeAsync(session, previous, timeout.Token); }
+            await Task.Delay(100, timeout.Token);
+            session.Dispose();
+            await session.Completion.WaitAsync(timeout.Token);
+            Assert.False(session.Ready);
+            Assert.Null(session.Failure);
+            Assert.NotNull(receiver);
+            await receiver.WaitForExitAsync(timeout.Token);
+        }
+        finally
+        {
+            session?.Dispose();
+            if (receiver is not null) { await StopAsync(receiver); receiver.Dispose(); }
+        }
     }
 
     [Fact]

@@ -205,6 +205,22 @@
       "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
     ]
   },
+  "INPUT005": {
+    "description": "One coalescing notification reader and reusable one-shot timer replace per-wait timeout tasks; serial pooled exchanges preserve suspended IO, one deadline and cancellation; shutdown wakes idle readers and active peers still return to idle.",
+    "tests": [
+      "DesktopTwin.Tests.InputWakeSignalTests.BurstsCoalesceAndNewSignalsAndDisposalStillCompleteAPendingWait",
+      "DesktopTwin.Tests.InputWakeSignalTests.WarmBufferedPendingAndTimedWaitsDoNotAllocatePerNotification",
+      "DesktopTwin.Tests.InputWakeSignalTests.DeadlineCanBeRearmedAndIsDisabledWhenTheReaderReturnsToIdle",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.WarmReleaseExchangesDoNotAllocateWhenIoCompletesInlineOrSuspends(suspend: False)",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.WarmReleaseExchangesDoNotAllocateWhenIoCompletesInlineOrSuspends(suspend: True)",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.SuspendedFramesKeepSnapshotsAndConsumeEveryIoResultExactlyOnce",
+      "DesktopTwin.Tests.RelativeInputAsyncTests.WriteAndReadShareOneDeadlineAndAPendingWriteObservesCancellation",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.BurstRequestsAndQueuedControlsCoalesceWithoutThrowingSignalExceptions",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.DisposeWakesIdleOrActiveLoopWithoutAnotherStatusRequest(armed: False)",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.DisposeWakesIdleOrActiveLoopWithoutAnotherStatusRequest(armed: True)",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
+    ]
+  },
   "WORK001": {
     "description": "Program launch is independent of settings writes; idle sessions and disarmed input peers do no periodic work, active input expiry and identity checks remain enforced, startup failures preserve their cause, presentation disposal releases subscribers, and snapshots do not start system verification.",
     "tests": [
