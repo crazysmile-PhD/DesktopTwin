@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
@@ -171,11 +172,12 @@ internal sealed class RelativeInputSession : IDisposable
     {
         try
         {
+            await Task.CompletedTask.ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
             var pump = new RelativeInputPump(_transport, _queue, _signal,
                 () => Interlocked.Read(ref _armedUntil), TakeStatusRequest, PublishStatus);
             await pump.RunAsync(sessionId, _stop.Token).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException or Win32Exception)
         {
             if (!_stop.IsCancellationRequested) { Failure = error.Message; AppLog.Warn("相对输入通道已断开。", error); }
         }

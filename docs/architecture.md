@@ -100,6 +100,10 @@ UI 的连续采样只续租，授权改变才唤醒通道，不重复排队 Rese
 
 主端和 Framework 接收端共用小端固定帧编解码：请求 9 字节、状态 36 字节、握手 12 字节，协议版本仍为 1。接收端在复用缓冲中完整读取一帧，分段读取和 EOF 都显式处理；删除中间内存流、BinaryReader/BinaryWriter 包装及逐字段读取。主端直接等待传输并发布状态，不再为每次交换包一层异步方法。
 
+主端握手仍使用 BCL 管道；首次交换后，`RelativeInputTransport` 为已连接的异步管道创建 `InputPipeStream`，其他 Stream 继续沿用既有路径。适配器借用调用者的 SafePipeHandle 引用，固定钉住传输者自有的请求／回复数组，复用一块 OVERLAPPED、一个完成事件和一个 Windows 线程池等待对象。事件句柄低位抑制该操作的 IOCP 通知，避免在原有完成回调之后再排队续体；同步完成直接返回，挂起操作注册该完成事件并返回只消费一次的 ValueTask。原生等待回调完成状态后直接接续串行循环，输入通知仍禁止在生产者线程运行 IO。会话循环开始时主动切到线程池一次，保证首次同步完成也不占用 UI。
+
+每连接只为永久的传输取消令牌注册一次取消动作。停止／超时取消当前原生 IO，完成事件排空后才能复用或释放 OVERLAPPED 与钉住缓冲；尚未消费的结果也禁止下一次 IO。关闭可与完成竞态，只有一次完成者发布结果。原生回调在接续调用者之前解除等待关联，允许续体内关闭自身；它在发布结果后不再访问旧操作的原生存储。适配器释放等待、上下文、缓冲和借用引用，原管道仍由会话持有。相关依据：[IOCP 低位约定](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getqueuedcompletionstatus)、[SetThreadpoolWait](https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-setthreadpoolwait) 与 [等待回调排空](https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-waitforthreadpoolwaitcallbacks)。
+
 `InputExchangeDeadline` 每连接持有一个 Windows 线程池单次计时器和一个链接的取消来源。交换开始时记录单调截止时间，完成后以空 due time 停止安排回调，避免反复停用托管计时器后残留的计时器队列空唤醒。已排队的旧回调仍在锁内复核当前期限；真正到期先标记永久失效，再取消 IO，不能跨到下次交换。SafeHandle 依次停用、排空、关闭计时器并释放弱引用上下文，原生上下文不延长会话生命周期。回调在执行取消前解除与原生计时器的关联，防止 IO 内联完成并释放计时器时等待自身；这时上下文已读入强局部变量，后续只检查受锁保护的所有者状态。相关契约见 [SetThreadpoolTimer](https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-setthreadpooltimer)、[回调排空](https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-waitforthreadpooltimercallbacks) 与 [解除回调关联](https://learn.microsoft.com/en-us/windows/win32/api/threadpoolapiset/nf-threadpoolapiset-disassociatecurrentthreadfromcallback)。
 
 Framework 接收端的 `ReceiverPipeStream` 继续使用 overlapped 管道，由原来的单个接收线程串行读写；每连接固定两个已钉住的缓冲、一个完成事件和一块 OVERLAPPED 存储，握手复用状态缓冲的前 12 字节。事件句柄低位按 Win32 契约设置，抑制该句柄上的 IOCP 通知，直接等待内核完成；不再进入 Framework 的逐次 APM 结果、等待对象及完成回调路径。读写只能使用自有缓冲，分段读与短写按实际字节数推进。
