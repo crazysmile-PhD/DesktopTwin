@@ -61,6 +61,7 @@ public static partial class ChildSessionEnvironmentCheck
     /// </summary>
     private static int _termsrvGeneration;
     private static bool _termsrvVerifyRunning;
+    private static CancellationTokenSource? _termsrvVerificationCancellation;
 
     /// <summary>已验证结果缓存 5 分钟；未验证结果 30 秒后允许显式重检。</summary>
     private static readonly TimeSpan TermsrvVerifiedTtl = TimeSpan.FromMinutes(5);
@@ -100,60 +101,64 @@ public static partial class ChildSessionEnvironmentCheck
                 var backups = CollectTermsrvBackups(system32);
                 var generation = _termsrvGeneration;
 
-                _ = Task.Run(() =>
-                {
-                    // 这一轮在排队期间可能已被作废（用户点了重新检测、或修复后复核过）。
-                    // 让它继续跑没有意义：它只会占住 sfc 闸门，让真正需要结论的那轮
-                    // 等满超时、最后拿到「未验证」。
-                    lock (TermsrvGate)
-                    {
-                        if (generation != _termsrvGeneration)
-                        {
-                            AppLog.Info("本轮 termsrv.dll 校验在开始前已过期，跳过。");
-                            return;
-                        }
-                    }
-
-                    TermsrvFileState result;
-                    try
-                    {
-                        result = VerifyTermsrv(termsrvPath, backups);
-                    }
-                    catch (Exception exception) when (exception is IOException
-                                                          or UnauthorizedAccessException
-                                                          or SecurityException
-                                                          or InvalidOperationException
-                                                          or System.ComponentModel.Win32Exception)
-                    {
-                        AppLog.Warn("校验 termsrv.dll 失败。", exception);
-                        result = new TermsrvFileState(File.Exists(termsrvPath), false, false, backups);
-                    }
-                    catch (Exception exception)
-                    {
-                        // 没预料到的异常也要把「校验中」放下：否则 _termsrvVerifyRunning 会一直为 true，
-                        // 这一项就永久停在「未验证」，再也不会出结论。
-                        AppLog.Error("校验 termsrv.dll 出现未预期异常。", exception);
-                        result = new TermsrvFileState(File.Exists(termsrvPath), false, false, backups);
-                    }
-
-                    lock (TermsrvGate)
-                    {
-                        if (generation != _termsrvGeneration)
-                        {
-                            // 这轮已经被作废（用户点了重新检测，或修复后复核过）：结果丢掉，
-                            // 也不能动「正在校验」标志——那个标志归最新的那轮负责。
-                            AppLog.Info("丢弃过期的 termsrv.dll 校验结果。");
-                            return;
-                        }
-
-                        _termsrvState = result;
-                        _termsrvStateAt = DateTime.UtcNow;
-                        _termsrvVerifyRunning = false;
-                    }
-                    TermsrvVerificationCompleted?.Invoke(null, EventArgs.Empty);
-                });
+                var cancellation = new CancellationTokenSource();
+                var token = cancellation.Token;
+                _termsrvVerificationCancellation = cancellation;
+                _ = Task.Run(() => VerifyTermsrvInBackgroundAsync(termsrvPath, backups, generation, cancellation, token));
             }
         }
+    }
+
+    private static async Task VerifyTermsrvInBackgroundAsync(string path, IReadOnlyList<string> backups,
+        int generation, CancellationTokenSource cancellation, CancellationToken token)
+    {
+        try
+        {
+            TermsrvFileState result;
+            try
+            {
+                result = await VerifyTermsrvAsync(path, backups,
+                    () => IsTermsrvGenerationCurrent(generation), token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return; }
+            catch (Exception exception)
+            {
+                // Expected and unexpected failures both release the current generation's running flag.
+                AppLog.Warn("校验 termsrv.dll 失败。", exception);
+                result = new TermsrvFileState(File.Exists(path), false, false, backups);
+            }
+
+            lock (TermsrvGate)
+            {
+                // Cancellation does not interrupt SFC once launched; only its current result can publish.
+                if (generation != _termsrvGeneration) return;
+                _termsrvState = result;
+                _termsrvStateAt = DateTime.UtcNow;
+                _termsrvVerifyRunning = false;
+            }
+            TermsrvVerificationCompleted?.Invoke(null, EventArgs.Empty);
+        }
+        finally
+        {
+            lock (TermsrvGate)
+            {
+                if (ReferenceEquals(_termsrvVerificationCancellation, cancellation))
+                    _termsrvVerificationCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private static bool IsTermsrvGenerationCurrent(int generation)
+    {
+        lock (TermsrvGate) return generation == _termsrvGeneration;
+    }
+
+    // Caller holds TermsrvGate; the worker owns disposal until its pending wait or running scan ends.
+    private static void CancelPendingTermsrvVerification()
+    {
+        _termsrvVerificationCancellation?.Cancel();
+        _termsrvVerificationCancellation = null;
     }
 
     /// <summary>
@@ -185,6 +190,7 @@ public static partial class ChildSessionEnvironmentCheck
             // 作废正在跑的那轮：它的结论是失效之前的事实，不能写回来。
             // 同时放下标志，让下一次显式重检能发起新的校验。
             _termsrvGeneration++;
+            CancelPendingTermsrvVerification();
             _termsrvVerifyRunning = false;
         }
     }
@@ -204,9 +210,11 @@ public static partial class ChildSessionEnvironmentCheck
         lock (TermsrvGate)
         {
             generation = ++_termsrvGeneration;
+            CancelPendingTermsrvVerification();
         }
 
-        var result = VerifyTermsrv(termsrvPath, backups);
+        // Repair needs its own verification result even if a later diagnostic request supersedes its cache entry.
+        var result = VerifyTermsrvAsync(termsrvPath, backups, () => true, CancellationToken.None).GetAwaiter().GetResult();
 
         lock (TermsrvGate)
         {
@@ -225,8 +233,10 @@ public static partial class ChildSessionEnvironmentCheck
         return result;
     }
 
-    private static TermsrvFileState VerifyTermsrv(string termsrvPath, IReadOnlyList<string> backups)
+    private static async Task<TermsrvFileState> VerifyTermsrvAsync(string termsrvPath,
+        IReadOnlyList<string> backups, Func<bool> isCurrent, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(termsrvPath))
         {
             return new TermsrvFileState(false, false, false, backups);
@@ -238,7 +248,7 @@ public static partial class ChildSessionEnvironmentCheck
             return new TermsrvFileState(true, false, false, backups);
         }
 
-        var exitCode = RunSfcVerifyFile(termsrvPath);
+        var exitCode = await RunSfcVerifyFileAsync(termsrvPath, isCurrent, cancellationToken).ConfigureAwait(false);
         return exitCode switch
         {
             0 => new TermsrvFileState(true, true, true, backups),
@@ -276,20 +286,9 @@ public static partial class ChildSessionEnvironmentCheck
     /// <summary>
     /// 运行 <c>sfc /verifyfile=</c>，返回退出码；跑不起来返回 -1。
     /// </summary>
-    private static int RunSfcVerifyFile(string path)
+    private static Task<int> RunSfcVerifyFileAsync(string path, Func<bool> isCurrent, CancellationToken cancellationToken)
     {
-        // 排队等前一个跑完，而不是同时起两个。等不到（前一个卡住）就照跑：
-        // 校验本身不该因为排队而失败，多一个进程也比拿不到结论强。
-        if (!SfcGate.Wait(TimeSpan.FromMinutes(3.5)))
-        {
-            // 上一轮校验还没结束：另起一个只会让两个 sfc 抢同一个文件。
-            // 上限比 sfc 自己的 3 分钟强杀更长，所以正常情况下等不到这里；
-            // 真等到了说明前一个进程卡死，返回 -1 让上层按「未验证」处理，不拿旧结论凑数。
-            AppLog.Warn("等待上一次 sfc 校验超时，本次跳过校验。");
-            return -1;
-        }
-
-        try
+        return SfcVerificationQueue.RunAsync(SfcGate, TimeSpan.FromMinutes(3.5), isCurrent, () =>
         {
             // 闸只管本进程。用户的 /scannow、或兜底扫描超时放闸后仍在跑的那种，
             // 都只能靠查进程发现——撞上去会让校验结论不可信（两个 sfc 争 CBS）。
@@ -300,11 +299,7 @@ public static partial class ChildSessionEnvironmentCheck
             }
 
             return RunSfcVerifyFileCore(path);
-        }
-        finally
-        {
-            SfcGate.Release();
-        }
+        }, cancellationToken);
     }
 
     /// <summary>

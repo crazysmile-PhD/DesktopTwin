@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +21,8 @@ internal sealed class RelativeInputController : IDisposable
     private readonly ChildSessionService _service;
     private readonly RelativeMouseCapture _capture;
     private readonly DispatcherTimer _poll;
+    private readonly RelativeInputActivity _activity;
+    private readonly HashSet<ushort> _injectedKeys = [];
     private RelativeInputSession? _session;
     private CancellationTokenSource? _starting;
     private uint? _sessionId;
@@ -41,7 +44,9 @@ internal sealed class RelativeInputController : IDisposable
         _settings = settings;
         _service = service;
         _capture = new RelativeMouseCapture(Send, ObserveGesture);
-        _poll = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(32) };
+        _activity = new RelativeInputActivity(allowed => _session?.SetForegroundLease(allowed),
+            () => _session?.RequestStatus(), TimeProvider.System);
+        _poll = new DispatcherTimer(DispatcherPriority.Input) { Interval = RelativeInputActivity.DiscoveryInterval };
         _poll.Tick += Poll;
         window.RdpHost.LoginCompleted += OnLogin;
         service.StateChanged += OnActivityChanged;
@@ -54,7 +59,15 @@ internal sealed class RelativeInputController : IDisposable
     private void OnActivityChanged(object? sender, EventArgs e) => Synchronize();
     private void OnVisibility(object sender, DependencyPropertyChangedEventArgs e) => Synchronize();
     private bool Send(InputPacket packet) => _session?.TrySend(packet) == true;
-    internal bool SendKey(ushort scan, bool up) => Ready && Send(new InputPacket(InputOperation.Key, scan, up ? 0 : 1));
+    internal bool SendKey(ushort scan, bool up)
+    {
+        if (!Ready) return false;
+        if (!up) { _injectedKeys.Add(scan); Synchronize(); }
+        var sent = _activity.Authorized && Send(new InputPacket(InputOperation.Key, scan, up ? 0 : 1));
+        if (up || !sent) _injectedKeys.Remove(scan);
+        // The active timer handles revocation after the queued key-up; focus loss still revokes immediately.
+        return sent;
+    }
     internal bool Move(int x, int y) => Captured && Send(new InputPacket(InputOperation.Move, x, y));
     internal bool Click() => Captured && Send(new InputPacket(InputOperation.Button, 1, 1))
         && Send(new InputPacket(InputOperation.Button, 1, 0));
@@ -94,17 +107,24 @@ internal sealed class RelativeInputController : IDisposable
         var handle = new WindowInteropHelper(_window).Handle;
         var foreground = _window.IsVisible && _window.WindowState != WindowState.Minimized
             && ChildSessionNativeMethods.GetForegroundWindow() == handle && !_settings.Current.Session.WatchMode;
-        if (!foreground || !session.Ready) { _poll.Stop(); Release(); return; }
-        session.SetForegroundLease(true);
+        if (!foreground || !session.Ready)
+        {
+            _poll.Stop();
+            Release();
+            _activity.Update(false, false, false);
+            return;
+        }
+        var inputAvailable = UpdateCapture();
+        _activity.Update(true, Captured, _injectedKeys.Count != 0, inputAvailable);
+        if (_activity.PollInterval is { } interval && _poll.Interval != interval) _poll.Interval = interval;
         _poll.Start();
-        UpdateCapture();
     }
-    private void UpdateCapture()
+    private bool UpdateCapture()
     {
         var alt = RawMouseNative.GetAsyncKeyState(0x12) < 0;
         _gesture.ObserveModifiers(alt, RawMouseNative.GetAsyncKeyState(0x11) < 0);
         var inputWindow = ChildSessionNativeMethods.GetRdpInputWindow(_window.RdpHost.Handle);
-        if (inputWindow == 0) { Release(); return; }
+        if (inputWindow == 0) { Release(); return false; }
         _capture.Observe(inputWindow, _window.RdpHost.Handle);
         WindowNativeMethods.TryGetWindowRect(_window.RdpHost.Handle, out var bounds);
         var point = DiagnosticInput.Cursor();
@@ -112,9 +132,10 @@ internal sealed class RelativeInputController : IDisposable
         var capture = !alt && !_gesture.Released && Status?.CursorVisible == false && inside
             && (Captured || !_capture.HasLegacyButtons)
             && ChildSessionNativeMethods.IsRdpInputWindowFocused(_window.RdpHost.Handle);
-        if (!capture) { ReleasePointer(); return; }
+        if (!capture) { ReleasePointer(); return true; }
         _capture.Start(inputWindow, bounds);
         _capture.Constrain(bounds);
+        return true;
     }
     private async Task StartSessionAsync(uint id)
     {
@@ -159,12 +180,13 @@ internal sealed class RelativeInputController : IDisposable
         ReleasePointer();
         _capture.ClearLegacyButtons();
         _gesture.ClearModifiers();
-        _session?.SetForegroundLease(false);
+        _injectedKeys.Clear();
     }
     private void StopSession()
     {
         _poll.Stop();
         Release();
+        _activity.Update(false, false, false);
         _capture.Detach();
         _starting?.Cancel();
         _session?.Dispose();
