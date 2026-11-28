@@ -158,53 +158,22 @@ internal sealed class RelativeInputSession : IDisposable
     internal bool TrySend(InputPacket packet)
     {
         if (!Ready || Volatile.Read(ref _disposed) != 0) return false;
-        if (!_queue.TryAdd(packet)) { Failure = "Input queue overflow; receiver disconnected."; Dispose(); return false; }
-        Signal();
+        if (!_queue.TryAdd(packet, out var requiresWake)) { Failure = "Input queue overflow; receiver disconnected."; Dispose(); return false; }
+        if (requiresWake) Signal();
         return true;
     }
 
     private void Signal() => _signal.Set();
+    private bool TakeStatusRequest() => Volatile.Read(ref _statusRequested) != 0
+        && Interlocked.Exchange(ref _statusRequested, 0) != 0;
 
     private async Task RunAsync(uint sessionId)
     {
         try
         {
-            var armed = false;
-            PublishStatus(await _transport.ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false));
-            var exchangedAt = Environment.TickCount64;
-            while (!_stop.IsCancellationRequested)
-            {
-                const int interval = 50;
-                var wait = armed ? (int)Math.Clamp(interval - (Environment.TickCount64 - exchangedAt), 0, interval)
-                    : Timeout.Infinite;
-                // Dispose wakes this wait explicitly; one cancellation registration already owns IO.
-                await _signal.WaitAsync(wait).ConfigureAwait(false);
-                if (_stop.IsCancellationRequested) break;
-                var allowed = Environment.TickCount64 < Interlocked.Read(ref _armedUntil);
-                var statusRequested = Interlocked.Exchange(ref _statusRequested, 0) != 0;
-                if (allowed != armed || statusRequested || (armed && Environment.TickCount64 - exchangedAt >= interval))
-                {
-                    PublishStatus(await _transport.ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false));
-                    armed = allowed;
-                    exchangedAt = Environment.TickCount64;
-                }
-                while (_queue.TryTake(out var packet))
-                {
-                    if (Environment.TickCount64 >= Interlocked.Read(ref _armedUntil))
-                    {
-                        _queue.Clear();
-                        if (armed)
-                        {
-                            PublishStatus(await _transport.ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false));
-                            armed = false;
-                            exchangedAt = Environment.TickCount64;
-                        }
-                        break;
-                    }
-                    PublishStatus(await _transport.ExchangeAsync(packet, sessionId).ConfigureAwait(false));
-                    exchangedAt = Environment.TickCount64;
-                }
-            }
+            var pump = new RelativeInputPump(_transport, _queue, _signal,
+                () => Interlocked.Read(ref _armedUntil), TakeStatusRequest, PublishStatus);
+            await pump.RunAsync(sessionId, _stop.Token).ConfigureAwait(false);
         }
         catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException)
         {
