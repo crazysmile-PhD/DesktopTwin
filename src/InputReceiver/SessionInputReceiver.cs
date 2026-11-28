@@ -27,22 +27,21 @@ namespace DesktopTwinInputReceiver
             using (var pipe = new NamedPipeClientStream(".", args[1], PipeDirection.InOut,
                 PipeOptions.Asynchronous, TokenImpersonationLevel.Identification))
             {
-                var lease = new InputLease(ReceiverInput.Inject);
+                var input = new ReceiverInput();
+                var lease = new InputLease(input.Inject);
                 try
                 {
                     pipe.Connect(15000);
                     uint server;
                     if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out server)
                         || server != parent) return 3;
-                    var reader = new BinaryReader(pipe);
-                    var writer = new BinaryWriter(pipe);
+                    var packetBytes = new byte[RelativeInputProtocol.PacketBytes];
                     var statusBytes = new byte[RelativeInputProtocol.StatusBytes];
-                    var statusBuffer = new MemoryStream(statusBytes, true);
-                    var statusWriter = new BinaryWriter(statusBuffer);
-                    writer.Write(RelativeInputProtocol.Version);
-                    writer.Write(session);
-                    writer.Write(Process.GetCurrentProcess().Id);
-                    writer.Flush();
+                    var hello = new byte[12];
+                    RelativeInputProtocol.WriteInt32(hello, 0, RelativeInputProtocol.Version);
+                    RelativeInputProtocol.WriteInt32(hello, 4, session);
+                    RelativeInputProtocol.WriteInt32(hello, 8, Process.GetCurrentProcess().Id);
+                    pipe.Write(hello, 0, hello.Length);
                     long expiresAt = Stopwatch.GetTimestamp() + 20 * Stopwatch.Frequency;
                     Timer watchdog = null;
                     watchdog = new Timer(delegate
@@ -56,9 +55,10 @@ namespace DesktopTwinInputReceiver
                     }, null, 20000, Timeout.Infinite);
                     using (watchdog)
                     {
+                        var firstPacket = true;
                         while (true)
                         {
-                            var packet = RelativeInputProtocol.ReadPacket(reader);
+                            var packet = RelativeInputProtocol.ReadPacket(pipe, packetBytes);
                             var receivedAt = Stopwatch.GetTimestamp();
                             var wasArmed = lease.Armed;
                             lease.Apply(packet);
@@ -67,10 +67,10 @@ namespace DesktopTwinInputReceiver
                                 : long.MaxValue);
                             // Disarmed peers hold no injected state: block on the pipe until input or EOF.
                             // Active traffic only renews the deadline; one callback observes its latest value.
-                            if (!lease.Armed) watchdog.Change(Timeout.Infinite, Timeout.Infinite);
-                            else if (!wasArmed) watchdog.Change(RelativeInputProtocol.LeaseMilliseconds, Timeout.Infinite);
-                            statusBuffer.Position = 0;
-                            ReceiverInput.WriteStatus(statusWriter, session, lease);
+                            if (!lease.Armed && (wasArmed || firstPacket)) watchdog.Change(Timeout.Infinite, Timeout.Infinite);
+                            else if (lease.Armed && !wasArmed) watchdog.Change(RelativeInputProtocol.LeaseMilliseconds, Timeout.Infinite);
+                            firstPacket = false;
+                            ReceiverInput.WriteStatus(statusBytes, session, lease);
                             pipe.Write(statusBytes, 0, statusBytes.Length);
                             if (packet.Operation == InputOperation.Close) return 0;
                         }

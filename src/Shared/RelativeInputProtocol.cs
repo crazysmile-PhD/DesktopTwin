@@ -12,7 +12,7 @@ namespace DesktopTwin.Input
         internal readonly int X, Y;
         internal InputPacket(InputOperation operation, int x = 0, int y = 0)
         { Operation = operation; X = x; Y = y; Validate(); }
-        internal void Validate()
+        private void Validate()
         {
             if (Operation < InputOperation.Heartbeat || Operation > InputOperation.Close)
                 throw new InvalidDataException("Unknown input operation.");
@@ -35,9 +35,49 @@ namespace DesktopTwin.Input
         internal const int PacketBytes = 9;
         internal const int StatusBytes = 36;
         internal const int LeaseMilliseconds = 1500;
-        internal static InputPacket ReadPacket(BinaryReader reader)
-        { return new InputPacket((InputOperation)reader.ReadByte(), reader.ReadInt32(), reader.ReadInt32()); }
-        internal static void WritePacket(BinaryWriter writer, InputPacket packet)
-        { packet.Validate(); writer.Write((byte)packet.Operation); writer.Write(packet.X); writer.Write(packet.Y); writer.Flush(); }
+        /// <summary>Reads one complete frame into caller-owned storage and validates it at construction.</summary>
+        internal static InputPacket ReadPacket(Stream stream, byte[] buffer)
+        {
+            var offset = 0;
+            while (offset < PacketBytes)
+            {
+                var read = stream.Read(buffer, offset, PacketBytes - offset);
+                if (read == 0) throw new EndOfStreamException("Incomplete input packet.");
+                offset += read;
+            }
+            return new InputPacket((InputOperation)buffer[0], ReadInt32(buffer, 1), ReadInt32(buffer, 5));
+        }
+
+        /// <summary>Encodes an already validated immutable packet; the caller owns the stream write.</summary>
+        internal static void WritePacket(byte[] buffer, InputPacket packet)
+        {
+            buffer[0] = (byte)packet.Operation;
+            WriteInt32(buffer, 1, packet.X);
+            WriteInt32(buffer, 5, packet.Y);
+        }
+
+        internal static int ReadInt32(byte[] buffer, int offset)
+        {
+            return buffer[offset] | buffer[offset + 1] << 8 | buffer[offset + 2] << 16 | buffer[offset + 3] << 24;
+        }
+
+        internal static long ReadInt64(byte[] buffer, int offset)
+        {
+            return (uint)ReadInt32(buffer, offset) | (long)ReadInt32(buffer, offset + 4) << 32;
+        }
+
+        internal static void WriteInt32(byte[] buffer, int offset, int value)
+        {
+            buffer[offset] = (byte)value;
+            buffer[offset + 1] = (byte)(value >> 8);
+            buffer[offset + 2] = (byte)(value >> 16);
+            buffer[offset + 3] = (byte)(value >> 24);
+        }
+
+        internal static void WriteInt64(byte[] buffer, int offset, long value)
+        {
+            WriteInt32(buffer, offset, (int)value);
+            WriteInt32(buffer, offset + 4, (int)(value >> 32));
+        }
     }
 }

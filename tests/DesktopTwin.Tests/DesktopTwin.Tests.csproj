@@ -25,6 +25,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- Compile the shipped receiver encoder itself; pure preparation tests never call SendInput. -->
+    <Compile Include="..\..\src\InputReceiver\ReceiverInput.cs" Link="Receiver\ReceiverInput.cs" />
   </ItemGroup>
 
 </Project>

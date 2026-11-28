@@ -39,3 +39,5 @@ Start-Process ./DesktopTwin.exe -ArgumentList @('--control-pipe', $pipeName)
 会话内输入通道启用后，原生 RDP 保持绝对模式。查询 `sessionInput.ready/captured/rawMoves/status.injectedMoves`；`capturePolling` 在前台、就绪的控制模式下才为 true，停用、隐藏、最小化、失焦和观看模式应为 false。`mouse` 在捕获时直接把相对位移送入同一输入队列，`key` 在通道就绪时由会话内接收端执行。自动测试位移不能替代物理鼠标的 WM_INPUT 捕获验证。Alt 点击让宿主的 RDP 客户端收到 Alt，保持修饰键与坐标点击使用同一路径，最多等待 1200 毫秒确认远端光标可见且捕获已释放后才点击。未确认时返回错误；取消或结束后释放宿主 Alt。直接向接收端发送 Alt 再从 RDP 点击会造成修饰键状态不一致，因此这组复合动作不用独立按键通道。
 
 接口依据：[命名管道选项](https://learn.microsoft.com/en-us/dotnet/api/system.io.pipes.pipeoptions)、[断开时丢弃未读数据](https://learn.microsoft.com/en-us/windows/win32/api/namedpipeapi/nf-namedpipeapi-disconnectnamedpipe)、[SendInput 与 UIPI](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)。
+
+`sessionInput.status.sequence` 是主端每次收到完整有效回复后递增的本地序号，即使光标等字段相同也会递增；它用于区分新回复与旧快照，不是成功注入次数，也不是额外的线缆字段。状态以只读值快照返回，后续复用接收缓冲不会修改先前读取的值。

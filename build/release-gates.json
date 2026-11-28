@@ -191,6 +191,20 @@
       "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
     ]
   },
+  "INPUT004": {
+    "description": "A fixed input ring preserves wraparound, ordering, merge bounds and overflow; fixed wire frames keep validation, fragmentation and snapshots; steady-state queue, codec and native preparation allocate no managed objects per packet.",
+    "tests": [
+      "DesktopTwin.Tests.InputHotPathTests.RingWraparoundPreservesTransitionsAndCoalescesOnlyItsLastMovement",
+      "DesktopTwin.Tests.InputHotPathTests.WarmQueueAndStatusDecodeHaveNoPerPacketManagedAllocation",
+      "DesktopTwin.Tests.InputHotPathTests.DecodedStatusRemainsAnIndependentSnapshotWhenTheBufferIsReused",
+      "DesktopTwin.Tests.InputHotPathTests.FixedPacketCodecPreservesWireBytesAndHandlesFragmentedOrTruncatedFrames",
+      "DesktopTwin.Tests.InputHotPathTests.WireBoundaryRejectsMalformedPacketsAndInvalidStatusCounters",
+      "DesktopTwin.Tests.ReceiverInputTests.PreparedPacketsKeepMouseKeyboardWheelFlagsAndNativeLayout",
+      "DesktopTwin.Tests.ReceiverInputTests.NativeBufferIsReusedAndItsUnionIsClearedForEachTransition",
+      "DesktopTwin.Tests.ReceiverInputTests.WarmPreparationAndStatusEncodingDoNotAllocatePerPacket",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
+    ]
+  },
   "WORK001": {
     "description": "Program launch is independent of settings writes; idle sessions and disarmed input peers do no periodic work, active input expiry and identity checks remain enforced, startup failures preserve their cause, presentation disposal releases subscribers, and snapshots do not start system verification.",
     "tests": [

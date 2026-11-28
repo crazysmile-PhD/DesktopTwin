@@ -178,15 +178,16 @@ public sealed class RelativeInputTests
     public void ProtocolPreservesSignedDeltasAndRejectsTruncationAndUnknownOperations()
     {
         using var bytes = new MemoryStream();
-        using var writer = new BinaryWriter(bytes);
-        RelativeInputProtocol.WritePacket(writer, new(InputOperation.Move, -90000, 60000));
-        RelativeInputProtocol.WritePacket(writer, new(InputOperation.Key, 0x138, 0));
+        var buffer = new byte[RelativeInputProtocol.PacketBytes];
+        RelativeInputProtocol.WritePacket(buffer, new(InputOperation.Move, -90000, 60000));
+        bytes.Write(buffer);
+        RelativeInputProtocol.WritePacket(buffer, new(InputOperation.Key, 0x138, 0));
+        bytes.Write(buffer);
         bytes.Position = 0;
-        using var reader = new BinaryReader(bytes);
-        var move = RelativeInputProtocol.ReadPacket(reader);
+        var move = RelativeInputProtocol.ReadPacket(bytes, buffer);
         Assert.Equal((-90000, 60000), (move.X, move.Y));
-        Assert.Equal(0x138, RelativeInputProtocol.ReadPacket(reader).X);
-        Assert.Throws<EndOfStreamException>(() => RelativeInputProtocol.ReadPacket(reader));
+        Assert.Equal(0x138, RelativeInputProtocol.ReadPacket(bytes, buffer).X);
+        Assert.Throws<EndOfStreamException>(() => RelativeInputProtocol.ReadPacket(bytes, buffer));
         Assert.Throws<InvalidDataException>(() => new InputPacket((InputOperation)255));
         Assert.Throws<InvalidDataException>(() => new InputPacket(InputOperation.Button, 6, 1));
         Assert.Throws<InvalidDataException>(() => new InputPacket(InputOperation.Move, int.MinValue, 0));

@@ -25,8 +25,9 @@ internal sealed class RelativeInputSession : IDisposable
     private long _armedUntil;
     private int _statusRequested;
     private int _disposed;
+    private readonly object _statusGate = new();
     private RelativeInputStatus? _status;
-    internal RelativeInputStatus? Status => Volatile.Read(ref _status);
+    internal RelativeInputStatus? Status { get { lock (_statusGate) return _status; } }
     private int _ready;
     internal bool Ready => Volatile.Read(ref _ready) != 0;
     internal string? Failure { get; private set; }
@@ -112,9 +113,10 @@ internal sealed class RelativeInputSession : IDisposable
         var hello = new byte[12];
         await _pipe.ReadExactlyAsync(hello, cancellationToken).ConfigureAwait(false);
         ValidatePeer(path, sessionId);
-        using var reader = new BinaryReader(new MemoryStream(hello));
-        if (reader.ReadInt32() != RelativeInputProtocol.Version || reader.ReadInt32() != sessionId
-            || reader.ReadUInt32() != PeerProcessId()) throw new IOException("Input receiver handshake mismatch.");
+        if (RelativeInputProtocol.ReadInt32(hello, 0) != RelativeInputProtocol.Version
+            || RelativeInputProtocol.ReadInt32(hello, 4) != sessionId
+            || unchecked((uint)RelativeInputProtocol.ReadInt32(hello, 8)) != PeerProcessId())
+            throw new IOException("Input receiver handshake mismatch.");
     }
 
     private uint PeerProcessId()
@@ -172,7 +174,7 @@ internal sealed class RelativeInputSession : IDisposable
         try
         {
             var armed = false;
-            await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false);
+            PublishStatus(await _transport.ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false));
             var exchangedAt = Environment.TickCount64;
             while (!_stop.IsCancellationRequested)
             {
@@ -184,7 +186,7 @@ internal sealed class RelativeInputSession : IDisposable
                 var statusRequested = Interlocked.Exchange(ref _statusRequested, 0) != 0;
                 if (allowed != armed || statusRequested || (armed && Environment.TickCount64 - exchangedAt >= interval))
                 {
-                    await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false);
+                    PublishStatus(await _transport.ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false));
                     armed = allowed;
                     exchangedAt = Environment.TickCount64;
                 }
@@ -195,13 +197,13 @@ internal sealed class RelativeInputSession : IDisposable
                         _queue.Clear();
                         if (armed)
                         {
-                            await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false);
+                            PublishStatus(await _transport.ExchangeAsync(new InputPacket(InputOperation.Heartbeat, 0), sessionId).ConfigureAwait(false));
                             armed = false;
                             exchangedAt = Environment.TickCount64;
                         }
                         break;
                     }
-                    await ExchangeAsync(packet, sessionId).ConfigureAwait(false);
+                    PublishStatus(await _transport.ExchangeAsync(packet, sessionId).ConfigureAwait(false));
                     exchangedAt = Environment.TickCount64;
                 }
             }
@@ -212,10 +214,10 @@ internal sealed class RelativeInputSession : IDisposable
         }
         finally { Volatile.Write(ref _ready, 0); _pipe.Dispose(); }
     }
-    private async Task ExchangeAsync(InputPacket packet, uint sessionId)
+    private void PublishStatus(RelativeInputStatus status)
     {
-        var status = await _transport.ExchangeAsync(packet, sessionId).ConfigureAwait(false);
-        Volatile.Write(ref _status, status);
+        // Copy one immutable value under a short lock; readers cannot see torn fields or buffer reuse.
+        lock (_statusGate) _status = status with { Sequence = (_status?.Sequence ?? 0) + 1 };
     }
     public void Dispose()
     {
