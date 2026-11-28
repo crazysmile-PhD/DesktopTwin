@@ -63,6 +63,10 @@
 
 接收端可在独立 Framework 测量宿主中加载未改动的生产程序集、执行其原入口，以 [AppDomain.MonitoringTotalAllocatedMemorySize](https://learn.microsoft.com/en-us/dotnet/api/system.appdomain.monitoringtotalallocatedmemorysize?view=netframework-4.8.1) 记录该域所有线程的累计分配差。测量控制管道只在每轮边界取样，并记录接收端程序集 SHA-256；该计数包含测量宿主的少量开销，应与未包装的真实接收端测试分开报告。
 
+定位分配类型时，先预热，再在测量宿主的 NoGCRegion 中完成固定次数交换，对同一生产接收端做前后两次暂停式 CLRMD 堆对象统计。记录类型的正向数量／字节差，并把控制管道的少量对象单列；不把整个进程转储作为公开测量附件。旧 Framework 管道的同步读写经过逐次 Begin/End 路径，每次交换新建两组 PipeStreamAsyncResult、ManualResetEvent、SafeWaitHandle、IOCompletionCallback 和 Overlapped；连接级原生 IO 复用消除这批逐次对象。
+
+回归测试将真实管道与同一接收循环组合，通过假的注入动作记录键／按钮，不调用 SendInput，覆盖租约续期、读写阻塞、截断／非法帧、EOF、关闭与取消竞态。接收线程的稳态读写单独用线程分配计数检验；真实 Framework 程序另验证身份、空闲、租约及截断帧超时。这里的零分配区间不包含连接初始化、异常、持键集合首次扩容或断线释放时的临时集合。
+
 ## 当前证据边界
 
 回归测试覆盖异步控制、旧任务失效、图形属性不支持时继续连接等行为；它们不包含真实游戏负载、显卡矩阵或端到端输入延迟。仓库暂不提供量化性能承诺。提交性能反馈时请附上比较条件和原始测量，而不是只报告“感觉像模拟器”。

@@ -66,7 +66,7 @@
 				<BinaryPath>$(IntermediateOutputPath)DesktopTwin.LaunchWorker.exe</BinaryPath>
 			</SessionProgram>
 			<SessionProgram Include="DesktopTwin.InputReceiver.exe">
-				<Sources>$(MSBuildProjectDirectory)\..\InputReceiver\SessionInputReceiver.cs;$(MSBuildProjectDirectory)\..\InputReceiver\ReceiverInput.cs;$(MSBuildProjectDirectory)\..\Shared\RelativeInputProtocol.cs;$(MSBuildProjectDirectory)\..\Shared\InputLease.cs</Sources>
+				<Sources>$(MSBuildProjectDirectory)\..\InputReceiver\SessionInputReceiver.cs;$(MSBuildProjectDirectory)\..\InputReceiver\ReceiverInput.cs;$(MSBuildProjectDirectory)\..\InputReceiver\ReceiverPipeStream.cs;$(MSBuildProjectDirectory)\..\InputReceiver\ReceiverLoop.cs;$(MSBuildProjectDirectory)\..\Shared\RelativeInputProtocol.cs;$(MSBuildProjectDirectory)\..\Shared\InputLease.cs</Sources>
 				<BinaryPath>$(IntermediateOutputPath)DesktopTwin.InputReceiver.exe</BinaryPath>
 			</SessionProgram>
 			<EmbeddedResource Include="@(SessionProgram->'%(BinaryPath)')">
