@@ -23,12 +23,14 @@ internal sealed class RelativeInputSession : IDisposable
     private readonly TaskCompletionSource _startup = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _started;
     private long _armedUntil;
+    private int _statusRequested;
     private int _disposed;
     private RelativeInputStatus? _status;
     internal RelativeInputStatus? Status => Volatile.Read(ref _status);
     private int _ready;
     internal bool Ready => Volatile.Read(ref _ready) != 0;
     internal string? Failure { get; private set; }
+    internal event EventHandler? StatusRefreshCompleted;
     internal string PipeName { get; } = "DesktopTwin.Input." + Guid.NewGuid().ToString("N");
 
     internal RelativeInputSession()
@@ -143,6 +145,14 @@ internal sealed class RelativeInputSession : IDisposable
         // Repeated UI samples renew a lease, not another reset/heartbeat round trip.
         if (allowed ? previous <= now : previous != 0) Signal();
     }
+
+    /// <summary>Requests one fresh status without granting a lease or starting a periodic heartbeat.</summary>
+    internal void RequestStatus()
+    {
+        if (!Ready || Volatile.Read(ref _disposed) != 0) return;
+        Interlocked.Exchange(ref _statusRequested, 1);
+        Signal();
+    }
     internal bool TrySend(InputPacket packet)
     {
         if (!Ready || Volatile.Read(ref _disposed) != 0) return false;
@@ -172,11 +182,13 @@ internal sealed class RelativeInputSession : IDisposable
                     : Timeout.Infinite;
                 await _signal.WaitAsync(wait, _stop.Token).ConfigureAwait(false);
                 var allowed = Environment.TickCount64 < Interlocked.Read(ref _armedUntil);
-                if (allowed != armed || (armed && Environment.TickCount64 - exchangedAt >= interval))
+                var statusRequested = Interlocked.Exchange(ref _statusRequested, 0) != 0;
+                if (allowed != armed || statusRequested || (armed && Environment.TickCount64 - exchangedAt >= interval))
                 {
                     await ExchangeAsync(new InputPacket(InputOperation.Heartbeat, allowed ? 1 : 0), sessionId).ConfigureAwait(false);
                     armed = allowed;
                     exchangedAt = Environment.TickCount64;
+                    if (statusRequested) StatusRefreshCompleted?.Invoke(this, EventArgs.Empty);
                 }
                 while (_queue.TryTake(out var packet))
                 {

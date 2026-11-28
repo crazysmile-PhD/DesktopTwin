@@ -151,7 +151,7 @@ public partial class MainWindow : FluentWindow
         _displayResizeTimer.Tick += OnDisplayResizeTick;
         _displayConfirmationTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
-            Interval = TimeSpan.FromSeconds(2)
+            Interval = RdpDisplayRequestController.ConfirmationTimeout
         };
         _displayConfirmationTimer.Tick += OnDisplayConfirmationTick;
         DesktopArea.SizeChanged += OnDesktopAreaSizeChanged;

@@ -162,6 +162,33 @@
       "DesktopTwin.Tests.SessionLogoffOperationTests.ReplacementSessionIsNotWaitedOn"
     ]
   },
+  "SFC001": {
+    "description": "Superseded SFC waiters cancel without blocking a worker and revalidate before execution; obsolete work cannot launch a scan or consume the replacement's gate.",
+    "tests": [
+      "DesktopTwin.Tests.SfcVerificationQueueTests.SupersededWaiterCannotStartSfcAfterTheGateOpens",
+      "DesktopTwin.Tests.SfcVerificationQueueTests.CanceledWaiterCompletesWithoutWaitingForRunningVerification",
+      "DesktopTwin.Tests.SfcVerificationQueueTests.ObsoleteOrBusyRequestsCannotStartVerification",
+      "DesktopTwin.Tests.SfcVerificationQueueTests.VerificationFailureReleasesTheGateForTheNextRequest"
+    ]
+  },
+  "VIEW002": {
+    "description": "Rejected display requests retry the same resolution; only pending or confirmed requests coalesce, and missing confirmation expires without reconnecting.",
+    "tests": [
+      "DesktopTwin.Tests.RdpDisplayRequestControllerTests.RejectedRequestCanRetryTheSameResolution",
+      "DesktopTwin.Tests.RdpDisplayRequestControllerTests.FailedChangeCannotReuseThePreviousCachedSuccess",
+      "DesktopTwin.Tests.RdpDisplayRequestControllerTests.UnconfirmedRequestCoalescesOnlyUntilItsDeadline",
+      "DesktopTwin.Tests.RdpDisplayRequestControllerTests.ConfirmedSizeCoalescesUntilTheDesktopChangesOrTheConnectionResets"
+    ]
+  },
+  "INPUT003": {
+    "description": "Foreground cursor discovery is passive and coalesced; capture keeps its short lease, background revokes input, and a one-shot status query cannot restart periodic heartbeats.",
+    "tests": [
+      "DesktopTwin.Tests.RelativeInputActivityTests.ForegroundWithoutCaptureOnlyRequestsCoalescedPassiveDiscovery",
+      "DesktopTwin.Tests.RelativeInputActivityTests.CaptureRenewsItsShortLeaseAndReleaseReturnsToPassiveDiscovery",
+      "DesktopTwin.Tests.RelativeInputActivityTests.BackgroundStopsDiscoveryAndRevokesEvenCapturedOrExplicitKeyInput",
+      "DesktopTwin.Tests.RelativeInputReceiverTests.PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle"
+    ]
+  },
   "WORK001": {
     "description": "Program launch is independent of settings writes; idle sessions and disarmed input peers do no periodic work, active input expiry and identity checks remain enforced, startup failures preserve their cause, presentation disposal releases subscribers, and snapshots do not start system verification.",
     "tests": [

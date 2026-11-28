@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +21,8 @@ internal sealed class RelativeInputController : IDisposable
     private readonly ChildSessionService _service;
     private readonly RelativeMouseCapture _capture;
     private readonly DispatcherTimer _poll;
+    private readonly RelativeInputActivity _activity;
+    private readonly HashSet<ushort> _injectedKeys = [];
     private RelativeInputSession? _session;
     private CancellationTokenSource? _starting;
     private uint? _sessionId;
@@ -41,7 +44,9 @@ internal sealed class RelativeInputController : IDisposable
         _settings = settings;
         _service = service;
         _capture = new RelativeMouseCapture(Send, ObserveGesture);
-        _poll = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(32) };
+        _activity = new RelativeInputActivity(allowed => _session?.SetForegroundLease(allowed),
+            () => _session?.RequestStatus(), TimeProvider.System);
+        _poll = new DispatcherTimer(DispatcherPriority.Input) { Interval = RelativeInputActivity.DiscoveryInterval };
         _poll.Tick += Poll;
         window.RdpHost.LoginCompleted += OnLogin;
         service.StateChanged += OnActivityChanged;
@@ -53,8 +58,24 @@ internal sealed class RelativeInputController : IDisposable
     private void OnLogin(object? sender, EventArgs e) { _failed = false; Failure = null; StopSession(); Synchronize(); }
     private void OnActivityChanged(object? sender, EventArgs e) => Synchronize();
     private void OnVisibility(object sender, DependencyPropertyChangedEventArgs e) => Synchronize();
+    private void OnStatusRefreshCompleted(object? sender, EventArgs e)
+    {
+        if (_window.Dispatcher.HasShutdownStarted) return;
+        _ = _window.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (ReferenceEquals(sender, _session)) Synchronize();
+        }));
+    }
     private bool Send(InputPacket packet) => _session?.TrySend(packet) == true;
-    internal bool SendKey(ushort scan, bool up) => Ready && Send(new InputPacket(InputOperation.Key, scan, up ? 0 : 1));
+    internal bool SendKey(ushort scan, bool up)
+    {
+        if (!Ready) return false;
+        if (!up) { _injectedKeys.Add(scan); Synchronize(); }
+        var sent = _activity.Authorized && Send(new InputPacket(InputOperation.Key, scan, up ? 0 : 1));
+        if (up || !sent) _injectedKeys.Remove(scan);
+        // The active timer handles revocation after the queued key-up; focus loss still revokes immediately.
+        return sent;
+    }
     internal bool Move(int x, int y) => Captured && Send(new InputPacket(InputOperation.Move, x, y));
     internal bool Click() => Captured && Send(new InputPacket(InputOperation.Button, 1, 1))
         && Send(new InputPacket(InputOperation.Button, 1, 0));
@@ -95,9 +116,10 @@ internal sealed class RelativeInputController : IDisposable
         var foreground = _window.IsVisible && _window.WindowState != WindowState.Minimized
             && ChildSessionNativeMethods.GetForegroundWindow() == handle && !_settings.Current.Session.WatchMode;
         if (!foreground || !session.Ready) { _poll.Stop(); Release(); return; }
-        session.SetForegroundLease(true);
-        _poll.Start();
         UpdateCapture();
+        _activity.Update(true, Captured, _injectedKeys.Count != 0);
+        if (_activity.PollInterval is { } interval && _poll.Interval != interval) _poll.Interval = interval;
+        _poll.Start();
     }
     private void UpdateCapture()
     {
@@ -127,6 +149,7 @@ internal sealed class RelativeInputController : IDisposable
             session = await RelativeInputSession.ConnectAsync(id, start.Token);
             start.Token.ThrowIfCancellationRequested();
             _session = session;
+            session.StatusRefreshCompleted += OnStatusRefreshCompleted;
             _sessionId = id;
             Failure = null;
             if (!start.IsCancellationRequested && _window.DataContext is MainWindowViewModel vm)
@@ -159,7 +182,8 @@ internal sealed class RelativeInputController : IDisposable
         ReleasePointer();
         _capture.ClearLegacyButtons();
         _gesture.ClearModifiers();
-        _session?.SetForegroundLease(false);
+        _injectedKeys.Clear();
+        _activity.Update(false, false, false);
     }
     private void StopSession()
     {
@@ -167,6 +191,7 @@ internal sealed class RelativeInputController : IDisposable
         Release();
         _capture.Detach();
         _starting?.Cancel();
+        if (_session is { } session) session.StatusRefreshCompleted -= OnStatusRefreshCompleted;
         _session?.Dispose();
         _session = null;
         _sessionId = null;

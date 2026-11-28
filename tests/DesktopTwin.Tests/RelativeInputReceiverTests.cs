@@ -136,6 +136,63 @@ public sealed class RelativeInputReceiverTests
     }
 
     [Fact]
+    public async Task PassiveStatusRefreshDoesNotStartHeartbeatsAndCaptureRevocationReturnsToIdle()
+    {
+        RelativeInputSession? session = null;
+        Process? receiver = null;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            session = await RelativeInputSession.ConnectAsync((uint)Process.GetCurrentProcess().SessionId, timeout.Token,
+                (path, arguments, _) =>
+                {
+                    receiver = Process.Start(new ProcessStartInfo(path, arguments) { UseShellExecute = false, CreateNoWindow = true });
+                    return Task.CompletedTask;
+                });
+            while (session.Status is null) await Task.Delay(10, timeout.Token);
+            var refreshed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            session.StatusRefreshCompleted += (_, _) => refreshed.TrySetResult();
+            session.RequestStatus();
+            await refreshed.Task.WaitAsync(timeout.Token);
+            var passive = session.Status;
+            await Task.Delay(1800, timeout.Token);
+            Assert.Same(passive, session.Status);
+            Assert.True(session.Ready);
+
+            // Authorize heartbeats only: this test never injects a mouse/key/button into the desktop.
+            session.SetForegroundLease(true);
+            await WaitForStatusChangeAsync(session, passive, timeout.Token);
+            var active = session.Status;
+            await WaitForStatusChangeAsync(session, active, timeout.Token);
+            session.SetForegroundLease(false);
+            var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            session.StatusRefreshCompleted += (_, _) => released.TrySetResult();
+            session.RequestStatus();
+            await released.Task.WaitAsync(timeout.Token);
+            var idle = session.Status;
+            await Task.Delay(1800, timeout.Token);
+            Assert.Same(idle, session.Status);
+            Assert.True(session.Ready);
+            Assert.NotNull(idle);
+            Assert.Equal(0, idle.HeldCount);
+            Assert.Equal(0, idle.InjectedMoves);
+            Assert.NotNull(receiver);
+            Assert.False(receiver.HasExited);
+        }
+        finally
+        {
+            session?.Dispose();
+            if (receiver is not null) { await StopAsync(receiver); receiver.Dispose(); }
+        }
+    }
+
+    private static async Task WaitForStatusChangeAsync(RelativeInputSession session,
+        RelativeInputStatus? previous, CancellationToken cancellationToken)
+    {
+        while (ReferenceEquals(previous, session.Status)) await Task.Delay(5, cancellationToken);
+    }
+
+    [Fact]
     public async Task ReceiverStopsWhenTheHostLeaseExpiresEvenIfTheHostProcessIsAlive()
     {
         using var pipe = NewPipe(out var name);

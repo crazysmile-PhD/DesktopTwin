@@ -37,7 +37,7 @@ internal sealed class RdpActiveXHost : AxHost
 
     private bool _smartSizingEnabled = true;
     private bool _displayReady;
-    private RdpDisplaySettings? _lastDisplayRequest;
+    private readonly RdpDisplayRequestController _displayRequests;
     internal DrawingSize? ReportedDesktopSize { get; private set; }
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     internal uint DesktopScaleFactor { get; set; } = 100;
@@ -61,6 +61,7 @@ internal sealed class RdpActiveXHost : AxHost
             ApplySmartSizing,
             callback => BeginInvoke(callback),
             RefreshSmartSizing);
+        _displayRequests = new RdpDisplayRequestController(ApplyDesktopDisplay, TimeProvider.System);
         Dock = DockStyle.Fill;
     }
 
@@ -101,7 +102,7 @@ internal sealed class RdpActiveXHost : AxHost
         ChildSessionNativeMethods.ClearRdpInputWindowCache(Handle);
         var client = GetRequiredOcx();
         _displayReady = false;
-        _lastDisplayRequest = null;
+        _displayRequests.Reset();
         ReportedDesktopSize = null;
         var width = Math.Clamp(desktopSize.Width, 200, 8192);
         var height = Math.Clamp(desktopSize.Height, 200, 8192);
@@ -256,15 +257,11 @@ internal sealed class RdpActiveXHost : AxHost
     internal bool UpdateDesktopDisplay(RdpDisplaySettings settings)
     {
         if (!_displayReady || ConnectedState != 1) return true;
-        if (_lastDisplayRequest == settings) return true;
-        _lastDisplayRequest = settings;
         try
         {
-            InvokeComMethod(GetRequiredOcx(), "UpdateSessionDisplaySettings",
-                (uint)settings.DesktopSize.Width, (uint)settings.DesktopSize.Height,
-                settings.PhysicalWidth, settings.PhysicalHeight, (uint)0, settings.ScaleFactor, (uint)100);
-            AppLog.Info($"已请求窗口桌面尺寸 {settings.DesktopSize.Width}×{settings.DesktopSize.Height}，"
-                + $"DPI={settings.ScaleFactor}%；实际尺寸等待 RDP 回调确认。");
+            if (_displayRequests.Request(settings, ReportedDesktopSize))
+                AppLog.Info($"已请求窗口桌面尺寸 {settings.DesktopSize.Width}×{settings.DesktopSize.Height}，"
+                    + $"DPI={settings.ScaleFactor}%；实际尺寸等待 RDP 回调确认。");
             return true;
         }
         catch (Exception error) when (error is COMException or MissingMemberException
@@ -274,6 +271,11 @@ internal sealed class RdpActiveXHost : AxHost
             return false;
         }
     }
+
+    private void ApplyDesktopDisplay(RdpDisplaySettings settings) =>
+        InvokeComMethod(GetRequiredOcx(), "UpdateSessionDisplaySettings",
+            (uint)settings.DesktopSize.Width, (uint)settings.DesktopSize.Height,
+            settings.PhysicalWidth, settings.PhysicalHeight, (uint)0, settings.ScaleFactor, (uint)100);
 
     private void RefreshSmartSizing()
     {
@@ -482,7 +484,7 @@ internal sealed class RdpActiveXHost : AxHost
     private void OnLoginComplete()
     {
         _displayReady = true;
-        _lastDisplayRequest = null;
+        _displayRequests.Reset();
         try
         {
             var client = GetRequiredOcx();
